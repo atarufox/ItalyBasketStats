@@ -1,0 +1,12 @@
+# Extracted APK artifacts & binaries
+APKs/
+extracted_*/
+scratch/
+*.json
+*.apk
+*.apks
+
+# OS & Temp
+.DS_Store
+Thumbs.db
+*.log
