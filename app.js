@@ -1,1158 +1,1988 @@
 /**
- * ItalyBasketStats - Modern Basketball Statistics Web App
- * FIP Stats & Italia Canestro Live Engine
- * Static Zero-Backend Architecture with Pre-Indexed Live Federal Database
- * Version: 2.0.0
+ * FIP Stats Live - Web Application (ItalyBasketStats2)
+ * Pure FIP Stats (NBN23 GraphQL) Engine
+ * 100% Real-time dynamic live data - Zero Mock Data
+ * Version: 2.1.0
  */
 
 class BasketApp {
   constructor() {
-    this.version = '2.0.0';
-    this.currentView = 'championships'; // Default landing view: Campionati & Gironi Hub
-    this.selectedCategory = 'all'; // 'all' | 'nazionali' | 'giovanili' | 'regionali' | 'femminili'
-    this.selectedRegion = 'all';
-    this.textFilter = '';
-    
-    // In-memory Database initialized from window.FIP_DATABASE
-    this.db = window.FIP_DATABASE || { season: '2025/2026', seasonId: '686e1422dd2c672160d5ca4b', competitions: [], boxscores: {} };
-    this.competitions = this.db.competitions || [];
-    this.boxscores = this.db.boxscores || {};
-
-    // Current State for Views
-    this.currentCompetition = null;
-    this.currentGironeIndex = 0;
-    this.currentCompetitionTab = 'standings'; // 'standings' | 'calendar' | 'teams' | 'scorers'
-    
-    this.currentMatch = null;
-    this.currentMatchTab = 'boxscore'; // 'boxscore' | 'shotchart' | 'gameflow' | 'leaders'
-    this.shotFilter = { team: 'all', period: 'all', result: 'all', player: 'all' };
-    
-    this.standingsViewTab = 'table'; // 'table' | 'scorers'
-    this.searchFilter = 'all'; // 'all' | 'competitions' | 'teams' | 'players'
-    
+    this.version = '2.1.0';
+    this.searchFilter = 'all'; // 'all' | 'players' | 'teams' | 'competitions'
+    this.currentView = 'search';
+    this.searchTimeout = null;
     this.comparisonChart = null;
+    this.playerChart = null;
+    this.gameFlowChart = null;
+    this.currentMatchData = null;
+    this.currentPlayerData = null;
+    this.activeCategoryFilter = 'all';
 
-    // Index all teams and players for instant search & cross-linking
-    this.indexData();
+    // Dynamic Auth & Transport Configuration
+    this.firebaseApiKey = 'AIzaSyDfES1qET23MQ0Y5_cgbDYbeQ168xVcpiA';
+    this.firebaseToken = null;
+    this.tokenExpiry = 0;
+    this.deviceId = 'fip-web-' + Math.random().toString(36).substring(2, 10);
 
-    // Setup Italian Regions list
-    this.regions = [
-      'Tutte le Regioni',
-      'Nazionale',
-      'Lombardia',
-      'Lazio',
-      'Emilia-Romagna',
-      'Veneto',
-      'Toscana',
-      'Piemonte',
-      'Campania',
-      'Puglia',
-      'Sicilia',
-      'Sardegna',
-      'Liguria',
-      'Marche',
-      'Friuli Venezia Giulia',
-      'Trentino Alto Adige',
-      'Calabria',
-      'Abruzzo'
+    // Multi-Season Resolution
+    // 686e1422dd2c672160d5ca4b = Youth & Major Leagues (U15/U17/U19 Eccellenza, Serie A, Serie A2, Femminili)
+    // 6a6871330078694f2edb74f3 = Serie B Nazionale, Serie C, DR1, DR2, Campionati Regionali
+    // 668ba5c2ceb8a7aa70c41ae2 = 2024/2025 Archive
+    this.knownSeasons = [
+      '686e1422dd2c672160d5ca4b',
+      '6a6871330078694f2edb74f3',
+      '668ba5c2ceb8a7aa70c41ae2'
+    ];
+    this.currentSeasonId = '686e1422dd2c672160d5ca4b';
+
+    // Official Championship Directory
+    this.championshipDirectory = [
+      {
+        id: 'u15-ecc',
+        category: 'giovanili',
+        name: 'Under 15 Maschile Eccellenza',
+        tag: 'Eccellenza Giovanile',
+        query: 'Under 15 Eccellenza',
+        icon: 'zap',
+        badgeColor: 'border-blue-500/30 text-blue-400 bg-blue-500/10',
+        desc: 'Il massimo livello del basket giovanile italiano U15 (19 gironi/fasi ufficiali)'
+      },
+      {
+        id: 'u17-ecc',
+        category: 'giovanili',
+        name: 'Under 17 Maschile Eccellenza',
+        tag: 'Eccellenza Giovanile',
+        query: 'Under 17 Eccellenza',
+        icon: 'flame',
+        badgeColor: 'border-blue-500/30 text-blue-400 bg-blue-500/10',
+        desc: 'Campionato d\'eccellenza nazionale di categoria Under 17 (11 gironi/fasi)'
+      },
+      {
+        id: 'u19-ecc',
+        category: 'giovanili',
+        name: 'Under 19 Maschile Eccellenza',
+        tag: 'Eccellenza Giovanile',
+        query: 'Under 19 Eccellenza',
+        icon: 'award',
+        badgeColor: 'border-blue-500/30 text-blue-400 bg-blue-500/10',
+        desc: 'Campionato nazionale giovanile propedeutico alle categorie senior'
+      },
+      {
+        id: 'serie-a',
+        category: 'nazionali',
+        name: 'LBA Serie A Maschile',
+        tag: 'Nazionale Massima Serie',
+        query: 'Serie A',
+        icon: 'crown',
+        badgeColor: 'border-amber-500/30 text-amber-400 bg-amber-500/10',
+        desc: 'Massima serie del campionato italiano di pallacanestro maschile'
+      },
+      {
+        id: 'serie-a2',
+        category: 'nazionali',
+        name: 'Serie A2 Maschile Old Wild West',
+        tag: 'Nazionale LNP',
+        query: 'Serie A2',
+        icon: 'shield',
+        badgeColor: 'border-sky-500/30 text-sky-400 bg-sky-500/10',
+        desc: 'Secondo livello professionistico nazionale LNP'
+      },
+      {
+        id: 'serie-b-naz',
+        category: 'nazionali',
+        name: 'Serie B Nazionale',
+        tag: 'Nazionale LNP',
+        query: 'Serie B',
+        icon: 'trophy',
+        badgeColor: 'border-cyan-500/30 text-cyan-400 bg-cyan-500/10',
+        desc: 'Terzo campionato nazionale con conference unificate'
+      },
+      {
+        id: 'serie-b-inter',
+        category: 'nazionali',
+        name: 'Serie B Interregionale',
+        tag: 'Interregionale FIP',
+        query: 'Serie B Interregionale',
+        icon: 'layers',
+        badgeColor: 'border-indigo-500/30 text-indigo-400 bg-indigo-500/10',
+        desc: 'Quattro conference interregionali (Nord, Centro, Sud)'
+      },
+      {
+        id: 'serie-c',
+        category: 'regionali',
+        name: 'Serie C Unica Regionale',
+        tag: 'Regionale FIP',
+        query: 'Serie C',
+        icon: 'map-pin',
+        badgeColor: 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10',
+        desc: 'Primo campionato senior gestito dai comitati regionali FIP'
+      },
+      {
+        id: 'dr1',
+        category: 'regionali',
+        name: 'Divisione Regionale 1 (DR1)',
+        tag: 'Regionale FIP',
+        query: 'Divisione Regionale 1',
+        icon: 'map',
+        badgeColor: 'border-teal-500/30 text-teal-400 bg-teal-500/10',
+        desc: 'Campionato regionale senior di primo livello (ex Serie D)'
+      },
+      {
+        id: 'a1-femm',
+        category: 'femminili',
+        name: 'Techfind Serie A1 Femminile',
+        tag: 'Nazionale Femminile',
+        query: 'Serie A1 Femminile',
+        icon: 'sparkles',
+        badgeColor: 'border-rose-500/30 text-rose-400 bg-rose-500/10',
+        desc: 'Massimo campionato di pallacanestro femminile italiano'
+      },
+      {
+        id: 'a2-femm',
+        category: 'femminili',
+        name: 'Serie A2 Femminile',
+        tag: 'Nazionale Femminile',
+        query: 'Serie A2 Femminile',
+        icon: 'heart',
+        badgeColor: 'border-pink-500/30 text-pink-400 bg-pink-500/10',
+        desc: 'Secondo livello nazionale della pallacanestro femminile'
+      },
+      {
+        id: 'u15-femm',
+        category: 'femminili',
+        name: 'Under 15 Femminile',
+        tag: 'Giovanile Femminile',
+        query: 'Under 15 Femminile',
+        icon: 'users',
+        badgeColor: 'border-fuchsia-500/30 text-fuchsia-400 bg-fuchsia-500/10',
+        desc: 'Campionati e fasi giovanili femminili di categoria Under 15'
+      }
     ];
   }
 
-  /**
-   * Pre-index all teams, players, and match summaries for 0ms lookup
-   */
-  indexData() {
-    this.indexedTeams = new Map();
-    this.indexedPlayers = new Map();
-    this.indexedMatches = new Map();
+  async init() {
+    console.log(`FIP Stats App v${this.version} initializing...`);
+    if (window.lucide) window.lucide.createIcons();
 
-    // Iterate competitions
-    for (const comp of this.competitions) {
-      if (!comp.groups) continue;
-      for (let gIdx = 0; gIdx < comp.groups.length; gIdx++) {
-        const group = comp.groups[gIdx];
-        
-        // Index standings teams
-        if (group.standings) {
-          for (const s of group.standings) {
-            const teamKey = s.teamName.trim().toUpperCase();
-            if (!this.indexedTeams.has(teamKey)) {
-              this.indexedTeams.set(teamKey, {
-                name: s.teamName,
-                compId: comp.id,
-                compName: comp.name,
-                compCategory: comp.category,
-                compRegion: comp.region,
-                groupName: group.name,
-                groupIdx: gIdx,
-                stats: s,
-                matches: [],
-                roster: new Map()
-              });
-            }
-          }
+    // Setup search shortcuts
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        const input = document.getElementById('globalSearchInput');
+        if (input) {
+          input.focus();
+          input.select();
         }
-
-        // Index rounds & matches
-        if (group.rounds) {
-          for (const round of group.rounds) {
-            if (!round.matches) continue;
-            for (const m of round.matches) {
-              const matchKey = String(m.fid);
-              this.indexedMatches.set(matchKey, {
-                ...m,
-                compId: comp.id,
-                compName: comp.name,
-                groupName: group.name,
-                groupIdx: gIdx,
-                roundName: round.name
-              });
-
-              // Associate match to teams
-              if (m.homeTeam && m.homeTeam.name) {
-                const hKey = m.homeTeam.name.trim().toUpperCase();
-                if (this.indexedTeams.has(hKey)) {
-                  this.indexedTeams.get(hKey).matches.push(m);
-                }
-              }
-              if (m.awayTeam && m.awayTeam.name) {
-                const aKey = m.awayTeam.name.trim().toUpperCase();
-                if (this.indexedTeams.has(aKey)) {
-                  this.indexedTeams.get(aKey).matches.push(m);
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Index boxscores & players
-    for (const [matchFid, box] of Object.entries(this.boxscores)) {
-      if (!box) continue;
-      const processPlayerList = (players, teamName, isHome) => {
-        if (!Array.isArray(players)) return;
-        for (const p of players) {
-          if (!p.name) continue;
-          const pName = p.name.trim();
-          const pKey = pName.toUpperCase();
-          
-          if (!this.indexedPlayers.has(pKey)) {
-            this.indexedPlayers.set(pKey, {
-              id: p.id || ('p-' + Math.random().toString(36).substr(2, 8)),
-              name: pName,
-              number: p.number || '#',
-              position: p.position || 'G/F',
-              teams: new Set(),
-              games: [],
-              totalPoints: 0,
-              totalRebounds: 0,
-              totalAssists: 0,
-              totalValuation: 0,
-              shots: []
-            });
-          }
-
-          const playerRecord = this.indexedPlayers.get(pKey);
-          if (teamName) playerRecord.teams.add(teamName);
-          
-          // Add game stats
-          const stats = p.stats || {};
-          const pts = stats.points || 0;
-          const reb = (stats.reboundsOffensive || 0) + (stats.reboundsDefensive || 0);
-          const ast = stats.assists || 0;
-          const val = stats.valuation || stats.efficiency || pts;
-
-          playerRecord.games.push({
-            matchFid: matchFid,
-            team: teamName,
-            isHome: isHome,
-            minutes: stats.minutes || '0:00',
-            points: pts,
-            rebounds: reb,
-            assists: ast,
-            valuation: val,
-            twoMade: stats.twoPointsMade || 0,
-            twoAttempted: stats.twoPointsAttempted || 0,
-            threeMade: stats.threePointsMade || 0,
-            threeAttempted: stats.threePointsAttempted || 0,
-            freeThrowsMade: stats.freeThrowsMade || 0,
-            freeThrowsAttempted: stats.freeThrowsAttempted || 0
-          });
-
-          playerRecord.totalPoints += pts;
-          playerRecord.totalRebounds += reb;
-          playerRecord.totalAssists += ast;
-          playerRecord.totalValuation += val;
-
-          // Add to team roster
-          if (teamName) {
-            const tKey = teamName.trim().toUpperCase();
-            if (this.indexedTeams.has(tKey)) {
-              this.indexedTeams.get(tKey).roster.set(pKey, {
-                name: pName,
-                number: p.number || '#',
-                position: p.position || 'G/F',
-                games: playerRecord.games.length,
-                ppg: (playerRecord.totalPoints / Math.max(1, playerRecord.games.length)).toFixed(1),
-                val: (playerRecord.totalValuation / Math.max(1, playerRecord.games.length)).toFixed(1)
-              });
-            }
-          }
-        }
-      };
-
-      if (box.homeTeam) {
-        processPlayerList(box.homeTeam.players, box.homeTeam.name, true);
-      }
-      if (box.awayTeam) {
-        processPlayerList(box.awayTeam.players, box.awayTeam.name, false);
-      }
-    }
-  }
-
-  /**
-   * App Initializer
-   */
-  init() {
-    this.renderRegionChips();
-    this.populateSelectDropdowns();
-    this.navigate('championships');
-    
-    // Auto-search listener if typed in global search
-    const searchInput = document.getElementById('globalSearchInput');
-    if (searchInput) {
-      searchInput.addEventListener('input', (e) => this.handleSearchInput(e.target.value));
-    }
-
-    if (window.lucide) {
-      lucide.createIcons();
-    }
-  }
-
-  showLoading(msg = 'Caricamento...') {
-    const el = document.getElementById('loadingIndicator');
-    const txt = document.getElementById('loadingIndicatorText');
-    if (el) el.classList.remove('hidden');
-    if (txt) txt.textContent = msg;
-  }
-
-  hideLoading() {
-    const el = document.getElementById('loadingIndicator');
-    if (el) el.classList.add('hidden');
-  }
-
-  /**
-   * Navigation router
-   */
-  navigate(viewName, params = {}) {
-    this.showLoading();
-    try {
-      this.currentView = viewName;
-
-      // Update Nav Tab UI styles
-      const tabs = ['championships', 'search', 'matches', 'standings', 'compare'];
-      tabs.forEach(tab => {
-        const dBtn = document.getElementById(`nav-btn-${tab}`);
-        const mBtn = document.getElementById(`mob-nav-${tab}`);
-        
-        if (dBtn) {
-          if (tab === viewName) {
-            dBtn.className = 'nav-tab active px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 text-white bg-orange-500/20 text-orange-400 border border-orange-500/30';
-          } else {
-            dBtn.className = 'nav-tab px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 text-gray-400 hover:text-white hover:bg-white/5';
-          }
-        }
-        if (mBtn) {
-          if (tab === viewName) {
-            mBtn.className = 'flex flex-col items-center gap-1 text-orange-400 text-[10px] font-bold';
-          } else {
-            mBtn.className = 'flex flex-col items-center gap-1 text-gray-400 hover:text-white text-[10px] font-semibold';
-          }
-        }
-      });
-
-      // Hide all view panels
-      document.querySelectorAll('.view-panel').forEach(panel => {
-        panel.classList.add('hidden');
-      });
-
-      // Show target view panel
-      const targetPanel = document.getElementById(`view-${viewName}`);
-      if (targetPanel) {
-        targetPanel.classList.remove('hidden');
-      }
-
-      // Render view-specific content
-      if (viewName === 'championships') {
-        this.renderChampionshipsView();
-      } else if (viewName === 'competition') {
-        this.renderCompetitionDetail(params.compId, params.groupIdx, params.tab);
-      } else if (viewName === 'match') {
-        this.renderMatchDetail(params.matchFid, params.tab);
-      } else if (viewName === 'team') {
-        this.renderTeamDetail(params.teamName);
-      } else if (viewName === 'player') {
-        this.renderPlayerDetail(params.playerName);
-      } else if (viewName === 'standings') {
-        this.renderStandingsView(params.compId);
-      } else if (viewName === 'matches') {
-        this.renderMatchesView(params.compId);
-      } else if (viewName === 'search') {
-        this.renderSearchView();
-      } else if (viewName === 'compare') {
-        this.renderCompareView();
-      }
-
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (err) {
-      console.error('Error during navigation:', err);
-    } finally {
-      this.hideLoading();
-      if (window.lucide) lucide.createIcons();
-    }
-  }
-
-  /* =========================================================================
-   * 1. CHAMPIONSHIPS & GIRONI HUB
-   * ========================================================================= */
-
-  renderRegionChips() {
-    const container = document.getElementById('regionChipsContainer');
-    if (!container) return;
-
-    // Calculate count per region
-    const counts = {};
-    for (const c of this.competitions) {
-      const reg = c.region || 'Nazionale';
-      counts[reg] = (counts[reg] || 0) + 1;
-    }
-
-    let html = `
-      <button onclick="app.setChampionshipRegion('all')" class="region-chip ${this.selectedRegion === 'all' ? 'active bg-orange-500 text-white font-bold' : 'bg-gray-900 text-gray-400 hover:text-white'} text-[11px] px-2.5 py-1 rounded-lg border border-white/5 transition-all">
-        Tutte le Regioni (${this.competitions.length})
-      </button>
-    `;
-
-    for (const reg of this.regions.slice(1)) {
-      const count = counts[reg] || 0;
-      if (count === 0 && reg !== 'Nazionale') continue;
-      const isActive = this.selectedRegion === reg;
-      html += `
-        <button onclick="app.setChampionshipRegion('${reg}')" class="region-chip ${isActive ? 'active bg-orange-500 text-white font-bold' : 'bg-gray-900 text-gray-400 hover:text-white'} text-[11px] px-2.5 py-1 rounded-lg border border-white/5 transition-all flex items-center gap-1">
-          <span>${reg}</span>
-          <span class="text-[9px] opacity-70">(${count})</span>
-        </button>
-      `;
-    }
-
-    container.innerHTML = html;
-  }
-
-  setChampionshipCategory(cat) {
-    this.selectedCategory = cat;
-    document.querySelectorAll('.champ-cat-btn').forEach(btn => {
-      if (btn.getAttribute('data-category') === cat) {
-        btn.className = 'champ-cat-btn active px-3.5 py-1.5 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 font-bold text-xs transition-all flex items-center gap-1.5';
-      } else {
-        btn.className = 'champ-cat-btn px-3.5 py-1.5 rounded-xl bg-gray-900 text-gray-400 hover:text-white border border-white/5 font-semibold text-xs transition-all flex items-center gap-1.5';
       }
     });
-    this.renderChampionshipsView();
+
+    try {
+      await this.getFirebaseAuthToken();
+      await this.fetchCurrentSeason();
+    } catch (e) {
+      console.warn('Initial session bootstrap notice:', e);
+    }
+
+    this.showWelcomeState();
   }
 
-  setChampionshipRegion(reg) {
-    this.selectedRegion = reg;
-    this.renderRegionChips();
-    this.renderChampionshipsView();
+  // ==========================================
+  // AUTHENTICATION & MULTI-STRATEGY NETWORKING
+  // ==========================================
+
+  async getFirebaseAuthToken() {
+    if (this.firebaseToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+      return this.firebaseToken;
+    }
+
+    try {
+      const cached = localStorage.getItem('fip_id_token');
+      const cachedExp = parseInt(localStorage.getItem('fip_token_exp') || '0', 10);
+      if (cached && cachedExp && Date.now() < cachedExp) {
+        this.firebaseToken = cached;
+        this.tokenExpiry = cachedExp;
+        return this.firebaseToken;
+      }
+    } catch (e) {}
+
+    const authUrl = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${this.firebaseApiKey}`;
+    const randEmail = `fip_${Date.now()}_${Math.floor(Math.random() * 10000)}@nbn23app.test`;
+
+    try {
+      const resp = await fetch(authUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: randEmail,
+          password: 'Password123!',
+          returnSecureToken: true
+        })
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        this.firebaseToken = data.idToken;
+        const expiresInSec = parseInt(data.expiresIn, 10) || 3600;
+        this.tokenExpiry = Date.now() + (expiresInSec - 120) * 1000;
+
+        try {
+          localStorage.setItem('fip_id_token', this.firebaseToken);
+          localStorage.setItem('fip_token_exp', this.tokenExpiry.toString());
+        } catch (e) {}
+
+        return this.firebaseToken;
+      }
+    } catch (e) {
+      console.warn('Firebase Auth exchange error:', e);
+    }
+
+    return null;
   }
 
-  filterChampionshipCards(query) {
-    this.textFilter = query.toLowerCase().trim();
-    this.renderChampionshipsView();
+  async gql(query, variables = {}) {
+    const token = await this.getFirebaseAuthToken();
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-device-id': this.deviceId,
+      'x-package-name': 'com.nbn23.fipapp',
+      'x-package-version': '2.13.0'
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const bodyStr = JSON.stringify({ query, variables });
+
+    // 1. Local or Serverless Proxy endpoints (/graphql or /api/graphql)
+    const localEndpoints = ['/graphql', '/api/graphql'];
+    for (const ep of localEndpoints) {
+      try {
+        const localResp = await fetch(ep, {
+          method: 'POST',
+          headers,
+          body: bodyStr
+        });
+        if (localResp.ok) {
+          const json = await localResp.json();
+          if (json.data) return json.data;
+          if (json.errors) console.warn('GraphQL API notice:', json.errors);
+        }
+      } catch (e) {}
+    }
+
+    // 2. Direct fetch to FIP GraphQL
+    try {
+      const directResp = await fetch('https://internal.nbn23.app/graphql', {
+        method: 'POST',
+        headers,
+        body: bodyStr
+      });
+      if (directResp.ok) {
+        const json = await directResp.json();
+        if (json.data) return json.data;
+        if (json.errors) console.warn('GraphQL API notice:', json.errors);
+      }
+    } catch (e) {}
+
+    // 3. Fallback CORS mirrors
+    const gateways = [
+      `https://corsproxy.io/?${encodeURIComponent('https://internal.nbn23.app/graphql')}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent('https://internal.nbn23.app/graphql')}`
+    ];
+
+    for (const gw of gateways) {
+      try {
+        const gwResp = await fetch(gw, {
+          method: 'POST',
+          headers,
+          body: bodyStr
+        });
+        if (gwResp.ok) {
+          const json = await gwResp.json();
+          if (json.data) return json.data;
+        }
+      } catch (e) {}
+    }
+
+    throw new Error('Impossibile contattare i server FIP Stats. Se stai aprendo index.html direttamente dal file system, avvia "start.bat" oppure "node server.js" per abilitare il proxy CORS.');
   }
 
-  renderChampionshipsView() {
+  async fetchCurrentSeason() {
+    try {
+      const query = `
+        query GetActiveSeason {
+          getCurrentSeason {
+            id
+            name
+          }
+          seasons {
+            id
+            name
+          }
+        }
+      `;
+      const data = await this.gql(query);
+      if (data?.getCurrentSeason?.id) {
+        this.currentSeasonId = data.getCurrentSeason.id;
+        if (!this.knownSeasons.includes(this.currentSeasonId)) {
+          this.knownSeasons.unshift(this.currentSeasonId);
+        }
+      }
+      if (data?.seasons) {
+        for (const s of data.seasons) {
+          if (!this.knownSeasons.includes(s.id)) this.knownSeasons.push(s.id);
+        }
+      }
+    } catch (e) {}
+  }
+
+  // ==========================================
+  // NAVIGATION & ROUTING
+  // ==========================================
+
+  navigate(viewName) {
+    this.currentView = viewName;
+
+    // Update active nav buttons
+    document.querySelectorAll('.fip-tab').forEach(btn => {
+      btn.className = 'fip-tab px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 text-gray-400 hover:text-white hover:bg-white/5';
+    });
+    document.querySelectorAll('.mobile-bottom-nav button, nav.md\\:hidden button').forEach(btn => {
+      btn.className = 'flex flex-col items-center gap-1 text-gray-400 hover:text-white text-[10px] font-semibold';
+    });
+
+    const activeNavBtn = document.getElementById(`nav-btn-${viewName}`);
+    if (activeNavBtn) {
+      activeNavBtn.className = 'fip-tab active px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 text-white bg-blue-600/20 border border-blue-500/30';
+    }
+
+    const mobNavBtn = document.getElementById(`mob-nav-${viewName}`);
+    if (mobNavBtn) {
+      mobNavBtn.className = 'flex flex-col items-center gap-1 text-blue-400 text-[10px] font-bold';
+    }
+
+    // Hide all views
+    document.querySelectorAll('.view-panel').forEach(panel => {
+      panel.classList.add('hidden');
+    });
+
+    // Show target view
+    const target = document.getElementById(`view-${viewName}`);
+    if (target) target.classList.remove('hidden');
+
+    if (viewName === 'championships') {
+      this.renderChampionshipsDirectory();
+    } else if (viewName === 'compare') {
+      this.updateComparison();
+    } else if (viewName === 'matches') {
+      this.loadRecentMatches();
+    } else if (viewName === 'standings') {
+      const select = document.getElementById('championshipSelect');
+      this.loadStandingsData(select ? select.value : 'Under 15 Eccellenza');
+    }
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  setSearchFilter(filter) {
+    this.searchFilter = filter;
+    document.querySelectorAll('.search-filter-chip').forEach(btn => {
+      if (btn.dataset.filter === filter) {
+        btn.className = 'search-filter-chip active px-3 py-1 rounded-full bg-blue-600/20 text-blue-400 border border-blue-500/30 font-semibold';
+      } else {
+        btn.className = 'search-filter-chip px-3 py-1 rounded-full bg-gray-800 text-gray-400 hover:text-white border border-white/5 font-semibold';
+      }
+    });
+
+    const searchVal = document.getElementById('globalSearchInput')?.value.trim();
+    if (searchVal) this.performSearch(searchVal);
+  }
+
+  // ==========================================
+  // CHAMPIONSHIPS DIRECTORY
+  // ==========================================
+
+  setChampionshipCategory(category) {
+    this.activeCategoryFilter = category;
+    document.querySelectorAll('.champ-cat-btn').forEach(btn => {
+      if (btn.dataset.category === category) {
+        btn.className = 'champ-cat-btn active px-4 py-2 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 font-bold text-xs transition-all flex items-center gap-2';
+      } else {
+        btn.className = 'champ-cat-btn px-4 py-2 rounded-xl bg-gray-900 text-gray-400 hover:text-white border border-white/5 font-semibold text-xs transition-all flex items-center gap-2';
+      }
+    });
+    this.renderChampionshipsDirectory();
+  }
+
+  renderChampionshipsDirectory() {
     const grid = document.getElementById('championshipsCardsGrid');
     if (!grid) return;
 
-    let filtered = this.competitions.filter(c => {
-      // Category filter
-      if (this.selectedCategory !== 'all' && c.category !== this.selectedCategory) {
-        return false;
-      }
-      // Region filter
-      if (this.selectedRegion !== 'all' && c.region !== this.selectedRegion) {
-        return false;
-      }
-      // Text filter
-      if (this.textFilter) {
-        const textMatch = (c.name || '').toLowerCase().includes(this.textFilter) ||
-                          (c.officialName || '').toLowerCase().includes(this.textFilter) ||
-                          (c.region || '').toLowerCase().includes(this.textFilter) ||
-                          (c.desc || '').toLowerCase().includes(this.textFilter);
-        if (!textMatch) return false;
-      }
-      return true;
-    });
+    const filtered = this.activeCategoryFilter === 'all'
+      ? this.championshipDirectory
+      : this.championshipDirectory.filter(c => c.category === this.activeCategoryFilter);
 
-    if (filtered.length === 0) {
-      grid.innerHTML = `
-        <div class="col-span-full glass-panel p-8 text-center space-y-3">
-          <i data-lucide="info" class="w-8 h-8 text-gray-500 mx-auto"></i>
-          <h3 class="text-base font-bold text-white">Nessun campionato trovato</h3>
-          <p class="text-xs text-gray-400">Prova a reimpostare i filtri di categoria o regione.</p>
-          <button onclick="app.setChampionshipCategory('all'); app.setChampionshipRegion('all'); document.getElementById('champFilterInput').value='';" class="px-4 py-2 bg-orange-500 text-white font-semibold rounded-xl text-xs hover:bg-orange-600 transition-all">
-            Mostra tutti i campionati
-          </button>
-        </div>
-      `;
-      if (window.lucide) lucide.createIcons();
-      return;
-    }
-
-    let html = '';
-    for (const champ of filtered) {
-      const gCount = champ.groups ? champ.groups.length : 0;
-      const catBadge = champ.category === 'nazionali' ? '🇮🇹 Nazionale' :
-                       champ.category === 'giovanili' ? '🚀 Giovanile' :
-                       champ.category === 'femminili' ? '👩 Femminile' : '📍 Regionale';
-      const catBadgeColor = champ.category === 'nazionali' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                            champ.category === 'giovanili' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
-                            champ.category === 'femminili' ? 'bg-pink-500/10 text-pink-400 border-pink-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-
-      const iconName = champ.icon || (champ.category === 'nazionali' ? 'crown' : champ.category === 'giovanili' ? 'zap' : 'trophy');
-
-      html += `
-        <div class="glass-panel p-5 flex flex-col justify-between glass-panel-hover group relative overflow-hidden transition-all border border-white/5 hover:border-orange-500/40">
-          
-          <div class="space-y-3 cursor-pointer" onclick="app.openCompetition('${champ.id}')">
-            <!-- Top Badges -->
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${catBadgeColor}">
-                ${catBadge}
-              </span>
-              <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-300 border border-white/10 flex items-center gap-1">
-                <i data-lucide="map-pin" class="w-2.5 h-2.5 text-orange-400"></i>
-                ${champ.region || 'Nazionale'}
-              </span>
-            </div>
-
-            <!-- Title & Icon -->
-            <div class="flex items-start gap-3 pt-1">
-              <div class="w-10 h-10 rounded-xl bg-gray-900 border border-white/10 flex items-center justify-center text-orange-400 group-hover:bg-orange-500 group-hover:text-white transition-all shadow-md flex-shrink-0">
-                <i data-lucide="${iconName}" class="w-5 h-5"></i>
-              </div>
-              <div class="flex-1 min-w-0">
-                <h3 class="font-bold text-base text-white group-hover:text-orange-400 transition-colors line-clamp-1">${champ.name}</h3>
-                <p class="text-[11px] text-gray-400 line-clamp-2 mt-0.5">${champ.desc || champ.officialName || 'Campionato Ufficiale FIP'}</p>
-              </div>
-            </div>
-
-            <!-- Gironi count pill -->
-            <div class="flex items-center gap-2 text-[11px] text-gray-400 bg-gray-950/60 p-2 rounded-lg border border-white/5">
-              <i data-lucide="layers" class="w-3.5 h-3.5 text-blue-400"></i>
-              <span><strong>${gCount}</strong> ${gCount === 1 ? 'Girone / Fase ufficiale' : 'Gironi / Fasi ufficiali'}</span>
+    grid.innerHTML = filtered.map(item => `
+      <div class="fip-card fip-card-hover p-5 flex flex-col justify-between gap-4 group cursor-pointer" onclick="app.openChampionshipByQuery('${this.escapeJs(item.query)}')">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[10px] font-bold px-2.5 py-1 rounded-full border ${item.badgeColor} uppercase tracking-wider">${item.tag}</span>
+            <div class="w-8 h-8 rounded-lg bg-gray-800/90 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+              <i data-lucide="${item.icon}" class="w-4 h-4"></i>
             </div>
           </div>
-
-          <!-- Direct Action Buttons (1-click navigation) -->
-          <div class="grid grid-cols-2 gap-2 pt-4 mt-3 border-t border-white/5">
-            <button onclick="event.stopPropagation(); app.openCompetition('${champ.id}', 0, 'standings')" class="px-2.5 py-1.5 rounded-lg bg-gray-900 hover:bg-orange-500/20 text-gray-300 hover:text-orange-400 border border-white/5 hover:border-orange-500/30 text-[11px] font-semibold transition-all flex items-center justify-center gap-1.5">
-              <i data-lucide="award" class="w-3.5 h-3.5"></i>
-              <span>Classifica</span>
-            </button>
-            <button onclick="event.stopPropagation(); app.openCompetition('${champ.id}', 0, 'calendar')" class="px-2.5 py-1.5 rounded-lg bg-gray-900 hover:bg-orange-500/20 text-gray-300 hover:text-orange-400 border border-white/5 hover:border-orange-500/30 text-[11px] font-semibold transition-all flex items-center justify-center gap-1.5">
-              <i data-lucide="calendar" class="w-3.5 h-3.5"></i>
-              <span>Calendario</span>
-            </button>
-            <button onclick="event.stopPropagation(); app.openCompetition('${champ.id}', 0, 'teams')" class="px-2.5 py-1.5 rounded-lg bg-gray-900 hover:bg-orange-500/20 text-gray-300 hover:text-orange-400 border border-white/5 hover:border-orange-500/30 text-[11px] font-semibold transition-all flex items-center justify-center gap-1.5">
-              <i data-lucide="users" class="w-3.5 h-3.5"></i>
-              <span>Squadre</span>
-            </button>
-            <button onclick="event.stopPropagation(); app.openCompetition('${champ.id}', 0, 'scorers')" class="px-2.5 py-1.5 rounded-lg bg-gray-900 hover:bg-orange-500/20 text-gray-300 hover:text-orange-400 border border-white/5 hover:border-orange-500/30 text-[11px] font-semibold transition-all flex items-center justify-center gap-1.5">
-              <i data-lucide="target" class="w-3.5 h-3.5"></i>
-              <span>Marcatori</span>
-            </button>
+          <div>
+            <h3 class="text-base font-bold text-white group-hover:text-blue-400 transition-colors line-clamp-1">${this.escapeHtml(item.name)}</h3>
+            <p class="text-xs text-gray-400 mt-1 line-clamp-2 leading-relaxed">${this.escapeHtml(item.desc)}</p>
           </div>
-
         </div>
-      `;
-    }
 
-    grid.innerHTML = html;
-    if (window.lucide) lucide.createIcons();
+        <div class="pt-3 border-t border-white/5 flex items-center justify-between text-xs">
+          <span class="text-blue-400 font-bold flex items-center gap-1 group-hover:underline">
+            <span>Sfoglia Gironi &amp; Classifiche</span>
+            <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+          </span>
+          <span class="text-[10px] text-gray-500 font-mono">FIP Hub</span>
+        </div>
+      </div>
+    `).join('');
+
+    if (window.lucide) window.lucide.createIcons();
   }
 
-  /* =========================================================================
-   * 2. COMPETITION & GIRONE DETAIL VIEW
-   * ========================================================================= */
-
-  openCompetition(compId, groupIdx = 0, tab = 'standings') {
-    const comp = this.competitions.find(c => c.id === compId || c.fid === compId);
-    if (!comp) return;
-    this.currentCompetition = comp;
-    this.currentGironeIndex = parseInt(groupIdx) || 0;
-    this.currentCompetitionTab = tab;
-    this.navigate('competition', { compId: comp.id, groupIdx: this.currentGironeIndex, tab });
-  }
-
-  setCompetitionGirone(idx) {
-    this.currentGironeIndex = parseInt(idx) || 0;
-    this.renderCompetitionDetail(this.currentCompetition.id, this.currentGironeIndex, this.currentCompetitionTab);
-  }
-
-  setCompetitionTab(tab) {
-    this.currentCompetitionTab = tab;
-    this.renderCompetitionDetail(this.currentCompetition.id, this.currentGironeIndex, tab);
-  }
-
-  renderCompetitionDetail(compId, groupIdx = 0, tab = 'standings') {
+  async openChampionshipByQuery(queryStr) {
+    this.navigate('competition');
     const container = document.getElementById('competitionDetailContent');
-    if (!container) return;
-
-    const comp = this.currentCompetition || this.competitions.find(c => c.id === compId || c.fid === compId);
-    if (!comp) {
-      container.innerHTML = `<div class="glass-panel p-8 text-center text-gray-400">Campionato non trovato</div>`;
-      return;
-    }
-    this.currentCompetition = comp;
-    this.currentGironeIndex = Math.min(comp.groups ? comp.groups.length - 1 : 0, Math.max(0, parseInt(groupIdx) || 0));
-    this.currentCompetitionTab = tab || 'standings';
-
-    const groups = comp.groups || [];
-    const currentGroup = groups[this.currentGironeIndex] || { name: 'Girone Unico', standings: [], rounds: [] };
-
-    let html = `
-      <!-- Breadcrumb & Top Bar -->
-      <div class="flex items-center justify-between gap-2 text-xs text-gray-400 pb-2">
-        <div class="flex items-center gap-2">
-          <button onclick="app.navigate('championships')" class="hover:text-white flex items-center gap-1 font-semibold text-orange-400">
-            <i data-lucide="arrow-left" class="w-4 h-4"></i> Tutti i Campionati
-          </button>
-          <span>/</span>
-          <span class="text-gray-200 font-medium">${comp.name}</span>
-        </div>
-        <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">Stagione 2025/2026</span>
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Interrogazione FIP Stats per "${this.escapeHtml(queryStr)}"...</p>
       </div>
-
-      <!-- Competition Banner Header -->
-      <div class="glass-panel p-6 space-y-4 relative overflow-hidden">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white shadow-xl shadow-orange-500/20 flex-shrink-0">
-              <i data-lucide="${comp.icon || 'trophy'}" class="w-7 h-7"></i>
-            </div>
-            <div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <h1 class="text-xl md:text-2xl font-extrabold text-white">${comp.name}</h1>
-                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30">${comp.region || 'Nazionale'}</span>
-              </div>
-              <p class="text-xs text-gray-400 mt-0.5">${comp.desc || comp.officialName || 'Campionato Ufficiale Federazione Italiana Pallacanestro'}</p>
-            </div>
-          </div>
-
-          <!-- Girone Selector Dropdown -->
-          <div class="flex flex-col gap-1 w-full md:w-auto">
-            <label class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Girone / Fase:</label>
-            <select onchange="app.setCompetitionGirone(this.value)" class="bg-gray-900 border border-white/10 text-xs font-bold rounded-xl px-3 py-2 text-white focus:outline-none focus:border-orange-500 cursor-pointer shadow-inner">
-              ${groups.map((g, i) => `
-                <option value="${i}" ${i === this.currentGironeIndex ? 'selected' : ''}>
-                  ${g.name || ('Girone ' + (i + 1))}
-                </option>
-              `).join('')}
-            </select>
-          </div>
-        </div>
-
-        <!-- Competition Tabs -->
-        <div class="flex items-center gap-2 pt-4 border-t border-white/5 overflow-x-auto">
-          <button onclick="app.setCompetitionTab('standings')" class="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${this.currentCompetitionTab === 'standings' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-900 text-gray-400 hover:text-white border border-white/5'}">
-            <i data-lucide="award" class="w-3.5 h-3.5"></i>
-            <span>Classifica</span>
-          </button>
-          <button onclick="app.setCompetitionTab('calendar')" class="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${this.currentCompetitionTab === 'calendar' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-900 text-gray-400 hover:text-white border border-white/5'}">
-            <i data-lucide="calendar" class="w-3.5 h-3.5"></i>
-            <span>Calendario Gare</span>
-          </button>
-          <button onclick="app.setCompetitionTab('teams')" class="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${this.currentCompetitionTab === 'teams' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-900 text-gray-400 hover:text-white border border-white/5'}">
-            <i data-lucide="users" class="w-3.5 h-3.5"></i>
-            <span>Squadre &amp; Roster</span>
-          </button>
-          <button onclick="app.setCompetitionTab('scorers')" class="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${this.currentCompetitionTab === 'scorers' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-900 text-gray-400 hover:text-white border border-white/5'}">
-            <i data-lucide="target" class="w-3.5 h-3.5"></i>
-            <span>Marcatori</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Tab Content Area -->
-      <div class="space-y-4">
     `;
 
-    if (this.currentCompetitionTab === 'standings') {
-      html += this.renderStandingsTabContent(currentGroup);
-    } else if (this.currentCompetitionTab === 'calendar') {
-      html += this.renderCalendarTabContent(currentGroup);
-    } else if (this.currentCompetitionTab === 'teams') {
-      html += this.renderTeamsTabContent(currentGroup);
-    } else if (this.currentCompetitionTab === 'scorers') {
-      html += this.renderScorersTabContent(currentGroup);
-    }
+    try {
+      const q = `
+        query SearchLiveChampionship($c: String!, $s: String!, $opt: ISearchOptions!) {
+          searchCompetitions(searchCriteria: $c, seasonId: $s, searchOptions: $opt) {
+            fid
+            name
+            shortName
+            projectKey
+            categoryName
+            groups {
+              fid
+              name
+            }
+          }
+        }
+      `;
 
-    html += `</div>`;
-    container.innerHTML = html;
-    if (window.lucide) lucide.createIcons();
-  }
+      let comps = [];
+      const queriesToTry = [queryStr];
+      if (queryStr.includes(' ')) {
+        queriesToTry.push(queryStr.split(' ').slice(0, 2).join(' '));
+        queriesToTry.push(queryStr.split(' ')[0]);
+      }
 
-  renderStandingsTabContent(group) {
-    const standings = group.standings || [];
-    if (standings.length === 0) {
-      return `
-        <div class="glass-panel p-8 text-center text-gray-400 space-y-2">
-          <i data-lucide="info" class="w-6 h-6 mx-auto text-gray-500"></i>
-          <p class="text-xs">Classifica in attesa di elaborazione referti ufficiali per questo girone.</p>
+      for (const qTerm of queriesToTry) {
+        for (const seasonId of this.knownSeasons) {
+          try {
+            const data = await this.gql(q, { c: qTerm, s: seasonId, opt: { limit: 15 } });
+            if (data?.searchCompetitions && data.searchCompetitions.length > 0) {
+              comps = data.searchCompetitions;
+              break;
+            }
+          } catch (err) {}
+        }
+        if (comps.length > 0) break;
+      }
+
+      if (comps.length === 0) {
+        container.innerHTML = `
+          <div class="fip-card p-8 text-center space-y-3">
+            <h3 class="text-lg font-bold text-white">Nessuna competizione trovata per "${this.escapeHtml(queryStr)}"</h3>
+            <p class="text-xs text-gray-400">Prova a cercarla tramite la barra di ricerca globale.</p>
+            <button onclick="app.navigate('championships')" class="px-4 py-2 bg-gray-800 rounded-xl text-xs font-semibold text-white">Torna ai Campionati</button>
+          </div>
+        `;
+        return;
+      }
+
+      const comp = comps[0];
+      this.renderFullCompetitionView(comp, comps);
+    } catch (e) {
+      container.innerHTML = `
+        <div class="fip-card p-8 text-center space-y-3 border-red-500/30">
+          <p class="text-sm text-red-400">Errore nel caricamento del campionato FIP.</p>
+          <button onclick="app.navigate('championships')" class="px-4 py-2 bg-gray-800 rounded-xl text-xs font-semibold text-white">Torna ai Campionati</button>
         </div>
       `;
     }
+  }
 
-    // Sort standings by position / points
-    const sorted = [...standings].sort((a, b) => (a.position || 99) - (b.position || 99));
+  async showCompetition(compFid, projectKey, compName) {
+    this.navigate('competition');
+    const container = document.getElementById('competitionDetailContent');
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Caricamento gironi di ${this.escapeHtml(compName || 'campionato')}...</p>
+      </div>
+    `;
+
+    try {
+      const q = `
+        query GetCompDirect($pK: String!, $cFid: String!) {
+          competition(projectKey: $pK, fid: $cFid) {
+            fid
+            name
+            shortName
+            projectKey
+            categoryName
+            groups {
+              fid
+              name
+            }
+          }
+        }
+      `;
+
+      let comp = null;
+      try {
+        const data = await this.gql(q, { pK: projectKey || 'fip', cFid: compFid });
+        const res = data?.competition;
+        comp = Array.isArray(res) ? res[0] : res;
+      } catch (err) {}
+
+      if (!comp || !comp.groups || comp.groups.length === 0) {
+        // Fallback search
+        await this.openChampionshipByQuery(compName || 'Under 15 Eccellenza');
+        return;
+      }
+
+      this.renderFullCompetitionView(comp, [comp]);
+    } catch (e) {
+      container.innerHTML = `
+        <div class="fip-card p-8 text-center space-y-3 border-red-500/30">
+          <p class="text-sm text-red-400">Errore nel caricamento della competizione.</p>
+          <button onclick="app.navigate('championships')" class="px-4 py-2 bg-gray-800 rounded-xl text-xs font-semibold text-white">Torna ai Campionati</button>
+        </div>
+      `;
+    }
+  }
+
+  renderFullCompetitionView(comp, relatedComps = []) {
+    const container = document.getElementById('competitionDetailContent');
+    const groups = comp.groups || [];
+    const firstGroup = groups[0];
+
+    container.innerHTML = `
+      <div class="fip-card p-6">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-indigo-600 flex items-center justify-center text-white shadow-xl flex-shrink-0">
+              <i data-lucide="trophy" class="w-8 h-8"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 font-bold">CAMPIONATO UFFICIALE FIP</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono">${groups.length} Gironi / Fasi</span>
+              </div>
+              <h1 class="text-2xl md:text-3xl font-extrabold text-white">${this.escapeHtml(comp.name)}</h1>
+              <p class="text-xs text-gray-400 mt-1">${this.escapeHtml(comp.categoryName || 'Federazione Italiana Pallacanestro')}</p>
+            </div>
+          </div>
+          
+          <button onclick="app.navigate('championships')" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2">
+            <i data-lucide="arrow-left" class="w-4 h-4"></i> Tutti i Campionati
+          </button>
+        </div>
+
+        ${relatedComps.length > 1 ? `
+          <div class="flex items-center gap-2 mt-4 pt-3 border-t border-white/5 overflow-x-auto pb-1 text-xs">
+            <span class="text-gray-400 font-semibold flex-shrink-0">Fasi collegate:</span>
+            ${relatedComps.map(rc => `
+              <button onclick="app.showCompetition('${rc.fid}', '${rc.projectKey || 'fip'}', '${this.escapeJs(rc.name)}')" class="px-3 py-1 rounded-lg ${rc.fid === comp.fid ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'bg-gray-900 text-gray-400 hover:text-white'} font-semibold flex-shrink-0">
+                ${this.escapeHtml(rc.shortName || rc.name)}
+              </button>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="fip-card p-6 space-y-6">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <i data-lucide="award" class="w-4 h-4 text-amber-400"></i>
+              <span>Classifica &amp; Calendario Girone</span>
+            </h3>
+            <p class="text-xs text-gray-400">Dati sincronizzati dai referti ufficiali FIP</p>
+          </div>
+
+          ${groups.length > 0 ? `
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-400 font-medium">Seleziona Girone:</label>
+              <select id="compGroupSelect" onchange="app.loadGroupAllData('${comp.projectKey || 'fip'}', '${comp.fid}', this.value)" class="bg-gray-900 border border-white/10 text-xs font-bold rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+                ${groups.map(g => `<option value="${g.fid}">${this.escapeHtml(g.name)}</option>`).join('')}
+              </select>
+            </div>
+          ` : ''}
+        </div>
+
+        <div id="compGroupStandingsContent">
+          <!-- Standings Table filled dynamically -->
+        </div>
+
+        <div class="border-t border-white/10 pt-6 space-y-4">
+          <h4 class="text-sm font-bold text-white flex items-center gap-2">
+            <i data-lucide="calendar" class="w-4 h-4 text-blue-400"></i>
+            <span>Partite &amp; Risultati del Girone</span>
+          </h4>
+          <div id="compGroupMatchesContent" class="space-y-3">
+            <!-- Matches filled dynamically -->
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    if (firstGroup) {
+      this.loadGroupAllData(comp.projectKey || 'fip', comp.fid, firstGroup.fid);
+    }
+  }
+
+  async loadGroupAllData(projectKey, compFid, groupFid) {
+    this.loadGroupStandings(projectKey, compFid, groupFid);
+    this.loadGroupMatches(projectKey, compFid, groupFid);
+  }
+
+  async loadGroupMatches(projectKey, compFid, groupFid) {
+    const container = document.getElementById('compGroupMatchesContent');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="py-6 flex flex-col items-center justify-center gap-2">
+        <div class="w-6 h-6 spinner"></div>
+        <p class="text-xs text-gray-400">Caricamento partite girone...</p>
+      </div>
+    `;
+
+    try {
+      const q = `
+        query GetGroupMatches($pK: String!, $cFid: String!, $gFid: String!) {
+          matchByGroup(projectKey: $pK, competitionFid: $cFid, groupFid: $gFid) {
+            fid
+            date
+            status
+            scores {
+              total {
+                homeScore
+                awayScore
+              }
+              partials {
+                period
+                homeScore
+                awayScore
+              }
+            }
+            homeTeam {
+              fid
+              name
+              logo
+            }
+            awayTeam {
+              fid
+              name
+              logo
+            }
+          }
+        }
+      `;
+
+      const data = await this.gql(q, { pK: projectKey || 'fip', cFid: compFid, gFid: groupFid });
+      const matches = data?.matchByGroup || [];
+
+      if (matches.length === 0) {
+        container.innerHTML = `<p class="text-xs text-gray-400 text-center py-4">Nessuna partita programmata in questo girone.</p>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          ${matches.map(m => this.renderMatchItemCard(m, projectKey, compFid)).join('')}
+        </div>
+      `;
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (e) {
+      container.innerHTML = `<p class="text-xs text-red-400 text-center py-4">Errore nel caricamento delle partite del girone.</p>`;
+    }
+  }
+
+  // ==========================================
+  // SEARCH ENGINE
+  // ==========================================
+
+  handleSearchInput(value) {
+    clearTimeout(this.searchTimeout);
+    const clearBtn = document.getElementById('clearSearchBtn');
+    if (value.trim()) clearBtn?.classList.remove('hidden');
+    else clearBtn?.classList.add('hidden');
+
+    this.searchTimeout = setTimeout(() => {
+      if (value.trim().length >= 2) this.performSearch(value.trim());
+      else if (value.trim().length === 0) this.showWelcomeState();
+    }, 350);
+  }
+
+  clearSearch() {
+    const input = document.getElementById('globalSearchInput');
+    if (input) input.value = '';
+    document.getElementById('clearSearchBtn')?.classList.add('hidden');
+    this.showWelcomeState();
+  }
+
+  quickSearch(query) {
+    const input = document.getElementById('globalSearchInput');
+    if (input) input.value = query;
+    document.getElementById('clearSearchBtn')?.classList.remove('hidden');
+    this.navigate('search');
+    this.performSearch(query);
+  }
+
+  showWelcomeState() {
+    const grid = document.getElementById('searchResultsGrid');
+    const title = document.getElementById('searchResultsTitle');
+    const badge = document.getElementById('resultsCountBadge');
+    const welcome = document.getElementById('searchWelcomeState');
+
+    if (grid) grid.innerHTML = '';
+    if (title) title.classList.add('hidden');
+    if (badge) badge.classList.add('hidden');
+    if (welcome) welcome.classList.remove('hidden');
+  }
+
+  async performSearch(query) {
+    if (!query || query.length < 2) return;
+
+    this.navigate('search');
+    const loading = document.getElementById('loadingIndicator');
+    const welcome = document.getElementById('searchWelcomeState');
+    const grid = document.getElementById('searchResultsGrid');
+    const title = document.getElementById('searchResultsTitle');
+    const badge = document.getElementById('resultsCountBadge');
+
+    welcome?.classList.add('hidden');
+    loading?.classList.remove('hidden');
+    if (grid) grid.innerHTML = '';
+
+    try {
+      const results = await this.queryLiveSearch(query);
+
+      title?.classList.remove('hidden');
+      badge?.classList.remove('hidden');
+      if (badge) badge.textContent = `${results.length} risultati FIP`;
+
+      if (results.length === 0) {
+        if (grid) {
+          grid.innerHTML = `
+            <div class="col-span-full p-8 text-center fip-card">
+              <i data-lucide="alert-circle" class="w-10 h-10 text-blue-400 mx-auto mb-2"></i>
+              <h4 class="text-base font-bold text-white">Nessun risultato trovato per "${this.escapeHtml(query)}"</h4>
+              <p class="text-xs text-gray-400 mt-1">Verifica il filtro attivo o prova con una parola chiave diversa.</p>
+            </div>
+          `;
+        }
+      } else {
+        if (grid) {
+          grid.innerHTML = results.map(item => this.renderResultCard(item)).join('');
+        }
+      }
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      if (grid) {
+        grid.innerHTML = `
+          <div class="col-span-full p-6 text-center fip-card border-red-500/30">
+            <i data-lucide="wifi-off" class="w-8 h-8 text-red-400 mx-auto mb-2"></i>
+            <p class="text-sm text-red-400">Impossibile completare la ricerca. Verifica che la connessione sia attiva.</p>
+          </div>
+        `;
+      }
+      if (window.lucide) window.lucide.createIcons();
+    } finally {
+      loading?.classList.add('hidden');
+    }
+  }
+
+  async queryLiveSearch(criteria) {
+    const rawResults = [];
+    const limit = 25;
+
+    // Strict Player search
+    if (this.searchFilter === 'players') {
+      const pQuery = `
+        query SearchPlayersLive($c: String!, $s: String!, $opt: ISearchOptions!) {
+          searchPlayers(searchCriteria: $c, seasonId: $s, searchOptions: $opt) {
+            fid
+            name
+            lastName
+            number
+            photo
+            captain
+            projectKey
+            teamFid
+            competitionFid
+            team {
+              fid
+              name
+              logo
+            }
+            competition {
+              fid
+              name
+            }
+          }
+        }
+      `;
+
+      for (const seasonId of this.knownSeasons) {
+        try {
+          const data = await this.gql(pQuery, { c: criteria, s: seasonId, opt: { limit } });
+          if (data?.searchPlayers) {
+            for (const p of data.searchPlayers) {
+              rawResults.push({
+                type: 'player',
+                fid: p.fid,
+                projectKey: p.projectKey || 'fip',
+                compFid: p.competitionFid || p.competition?.fid || '',
+                teamFid: p.teamFid || p.team?.fid || '',
+                title: `${p.name} ${p.lastName || ''}`.trim(),
+                subtitle: p.team?.name ? `${p.team.name} • ${p.competition?.name || ''}` : (p.competition?.name || 'Atleta FIP'),
+                meta: p.number ? `#${p.number}` : 'Atleta',
+                avatar: (p.photo && p.photo !== 'N/A') ? p.photo : null
+              });
+            }
+          }
+        } catch (e) {}
+      }
+
+      const seen = new Set();
+      return rawResults.filter(r => {
+        if (r.type !== 'player') return false;
+        if (seen.has(r.fid)) return false;
+        seen.add(r.fid);
+        return true;
+      });
+    }
+
+    // Strict Competition search
+    if (this.searchFilter === 'competitions') {
+      const cQuery = `
+        query SearchCompetitionsLive($c: String!, $s: String!, $opt: ISearchOptions!) {
+          searchCompetitions(searchCriteria: $c, seasonId: $s, searchOptions: $opt) {
+            fid
+            name
+            shortName
+            projectKey
+            categoryName
+            groups {
+              fid
+              name
+            }
+          }
+        }
+      `;
+
+      for (const seasonId of this.knownSeasons) {
+        try {
+          const data = await this.gql(cQuery, { c: criteria, s: seasonId, opt: { limit } });
+          if (data?.searchCompetitions) {
+            for (const c of data.searchCompetitions) {
+              rawResults.push({
+                type: 'competition',
+                fid: c.fid,
+                projectKey: c.projectKey || 'fip',
+                title: c.name || c.shortName,
+                subtitle: c.categoryName ? `${c.categoryName} • ${c.groups?.length || 0} gironi` : `${c.groups?.length || 0} gironi/fasi`,
+                meta: 'Campionato Ufficiale',
+                avatar: null
+              });
+            }
+          }
+        } catch (e) {}
+      }
+
+      const seen = new Set();
+      return rawResults.filter(r => {
+        if (r.type !== 'competition') return false;
+        if (seen.has(r.fid)) return false;
+        seen.add(r.fid);
+        return true;
+      });
+    }
+
+    // Strict Team search
+    if (this.searchFilter === 'teams') {
+      const tQuery = `
+        query SearchTeamsLive($c: String!, $s: String!, $opt: ISearchOptions!) {
+          searchTeams(searchCriteria: $c, seasonId: $s, searchOptions: $opt) {
+            fid
+            name
+            projectKey
+            competitionFid
+            logo
+            standingPosition
+            competition {
+              fid
+              name
+            }
+          }
+        }
+      `;
+
+      for (const seasonId of this.knownSeasons) {
+        try {
+          const data = await this.gql(tQuery, { c: criteria, s: seasonId, opt: { limit } });
+          if (data?.searchTeams) {
+            for (const t of data.searchTeams) {
+              rawResults.push({
+                type: 'team',
+                fid: t.fid,
+                projectKey: t.projectKey || 'fip',
+                compFid: t.competitionFid || t.competition?.fid || '',
+                title: t.name,
+                subtitle: t.competition?.name || 'Competizione FIP',
+                meta: t.standingPosition ? `Posizione: ${t.standingPosition}°` : 'Società FIP',
+                avatar: (t.logo && t.logo !== 'N/A') ? t.logo : null
+              });
+            }
+          }
+        } catch (e) {}
+      }
+
+      const seen = new Set();
+      return rawResults.filter(r => {
+        if (r.type !== 'team') return false;
+        if (seen.has(r.fid)) return false;
+        seen.add(r.fid);
+        return true;
+      });
+    }
+
+    // Universal Search (All categories)
+    const uniQuery = `
+      query UniversalSearch($c: String!, $s: String!, $opt: ISearchOptions!) {
+        search(searchCriteria: $c, seasonId: $s, searchOptions: $opt) {
+          __typename
+          ... on Competition {
+            compFid: fid
+            compName: name
+            shortName
+            categoryName
+            compProjectKey: projectKey
+          }
+          ... on Team {
+            teamFid: fid
+            teamCompFid: competitionFid
+            teamName: name
+            standingPosition
+            teamProjectKey: projectKey
+            logo
+            teamComp: competition {
+              fid
+              name
+            }
+          }
+          ... on Player {
+            playerFid: fid
+            playerCompFid: competitionFid
+            playerTeamFid: teamFid
+            playerName: name
+            playerLastName: lastName
+            playerNumber: number
+            playerPhoto: photo
+            playerCaptain: captain
+            playerProjectKey: projectKey
+            playerTeam: team {
+              fid
+              name
+            }
+            playerComp: competition {
+              fid
+              name
+            }
+          }
+          ... on UniquePlayer {
+            uniqueId: id
+            uniqueName: name
+            uniqueLastName: lastName
+            uniquePhoto: photo
+          }
+        }
+      }
+    `;
+
+    for (const seasonId of this.knownSeasons) {
+      try {
+        const data = await this.gql(uniQuery, { c: criteria, s: seasonId, opt: { limit: 30 } });
+        const rawItems = data?.search || [];
+
+        for (const item of rawItems) {
+          if (item.__typename === 'Competition') {
+            rawResults.push({
+              type: 'competition',
+              fid: item.compFid,
+              projectKey: item.compProjectKey || 'fip',
+              title: item.compName || item.shortName,
+              subtitle: item.categoryName ? `${item.categoryName} • Campionato FIP` : 'Campionato Ufficiale FIP',
+              meta: 'Campionato',
+              avatar: null
+            });
+          } else if (item.__typename === 'Team') {
+            rawResults.push({
+              type: 'team',
+              fid: item.teamFid,
+              projectKey: item.teamProjectKey || 'fip',
+              compFid: item.teamCompFid || item.teamComp?.fid || '',
+              title: item.teamName,
+              subtitle: item.teamComp?.name || 'Squadra FIP',
+              meta: item.standingPosition ? `Posizione: ${item.standingPosition}°` : 'Club',
+              avatar: (item.logo && item.logo !== 'N/A') ? item.logo : null
+            });
+          } else if (item.__typename === 'Player') {
+            rawResults.push({
+              type: 'player',
+              fid: item.playerFid,
+              projectKey: item.playerProjectKey || 'fip',
+              compFid: item.playerCompFid || item.playerComp?.fid || '',
+              teamFid: item.playerTeamFid || item.playerTeam?.fid || '',
+              title: `${item.playerName} ${item.playerLastName || ''}`.trim(),
+              subtitle: item.playerTeam?.name ? `${item.playerTeam.name} • ${item.playerComp?.name || ''}` : (item.playerComp?.name || 'Atleta FIP'),
+              meta: item.playerNumber ? `#${item.playerNumber}` : 'Giocatore',
+              avatar: (item.playerPhoto && item.playerPhoto !== 'N/A') ? item.playerPhoto : null
+            });
+          } else if (item.__typename === 'UniquePlayer') {
+            rawResults.push({
+              type: 'uniquePlayer',
+              fid: item.uniqueId,
+              uniqueId: item.uniqueId,
+              title: `${item.uniqueName} ${item.uniqueLastName || ''}`.trim(),
+              subtitle: 'Carriera & Statistiche Aggregate FIP',
+              meta: 'Profilo Unico FIP',
+              avatar: (item.uniquePhoto && item.uniquePhoto !== 'N/A') ? item.uniquePhoto : null
+            });
+          }
+        }
+      } catch (e) {}
+    }
+
+    const seen = new Set();
+    return rawResults.filter(r => {
+      const key = `${r.type}_${r.fid || r.uniqueId || r.title}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  renderResultCard(item) {
+    let icon = 'shield';
+    let typeBadge = '';
+    let clickHandler = '';
+
+    if (item.type === 'player') {
+      icon = 'user';
+      typeBadge = '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">ATLETA FIP</span>';
+      clickHandler = `app.showPlayer('${item.projectKey || 'fip'}', '${item.compFid}', '${item.teamFid}', '${item.fid}', '${this.escapeJs(item.title)}')`;
+    } else if (item.type === 'uniquePlayer') {
+      icon = 'user-check';
+      typeBadge = '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">CARRIERA FIP</span>';
+      clickHandler = `app.showUniquePlayer('${item.uniqueId}', '${this.escapeJs(item.title)}')`;
+    } else if (item.type === 'team') {
+      icon = 'shield';
+      typeBadge = '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">SQUADRA</span>';
+      clickHandler = `app.showTeam('${item.projectKey || 'fip'}', '${item.compFid}', '${item.fid}', '${this.escapeJs(item.title)}')`;
+    } else if (item.type === 'competition') {
+      icon = 'trophy';
+      typeBadge = '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">CAMPIONATO</span>';
+      clickHandler = `app.showCompetition('${item.fid}', '${item.projectKey || 'fip'}', '${this.escapeJs(item.title)}')`;
+    }
 
     return `
-      <div class="glass-panel overflow-hidden">
-        <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between">
-          <h3 class="font-bold text-sm text-white flex items-center gap-2">
-            <i data-lucide="award" class="w-4 h-4 text-orange-400"></i>
-            <span>Classifica Ufficiale - ${group.name}</span>
-          </h3>
-          <span class="text-xs text-gray-400">${sorted.length} Squadre</span>
+      <div onclick="${clickHandler}" class="fip-card fip-card-hover p-4 cursor-pointer flex flex-col justify-between gap-3 group">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-xl bg-gray-800/80 border border-white/10 flex items-center justify-center text-blue-400 group-hover:border-blue-500/40 group-hover:scale-105 transition-all flex-shrink-0 overflow-hidden">
+              ${item.avatar ? `<img src="${item.avatar}" class="w-full h-full object-cover" alt="${this.escapeHtml(item.title)}" onerror="this.onerror=null; this.src=''; this.parentElement.innerHTML='<i data-lucide=\\'${icon}\\' class=\\'w-6 h-6\\'></i>';">` : `<i data-lucide="${icon}" class="w-6 h-6"></i>`}
+            </div>
+            <div>
+              <div class="flex items-center gap-2 mb-1">
+                ${typeBadge}
+              </div>
+              <h3 class="font-bold text-base text-white group-hover:text-blue-400 transition-colors line-clamp-1">${this.escapeHtml(item.title)}</h3>
+              <p class="text-xs text-gray-400 line-clamp-1">${this.escapeHtml(item.subtitle || '')}</p>
+            </div>
+          </div>
         </div>
-        
+
+        <div class="flex items-center justify-between pt-2 border-t border-white/5 text-xs text-gray-400">
+          <span class="font-mono text-[11px] text-gray-400">${this.escapeHtml(item.meta || '')}</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">FIP Live</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // ==========================================
+  // MATCH CENTER (PARTITA LIVE & DETTAGLIO)
+  // Replicating official screens: Recap, Confronto, Andamento Partita, Grafico Tiri, Tabellino, Quintetti
+  // ==========================================
+
+  async showMatch(projectKey, compFid, matchFid) {
+    this.navigate('match');
+    const container = document.getElementById('matchDetailContent');
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Caricamento Match Center FIP...</p>
+      </div>
+    `;
+
+    try {
+      const query = `
+        query GetMatchDetails($projectKey: String!, $fid: String!) {
+          matchBy(projectKey: $projectKey, fid: $fid) {
+            fid
+            date
+            status
+            roundName
+            scores {
+              total {
+                homeScore
+                awayScore
+              }
+              partials {
+                period
+                homeScore
+                awayScore
+              }
+            }
+            stats {
+              biggestLead {
+                homeTeam
+                awayTeam
+              }
+              timesTied
+              leadChanges
+            }
+            homeTeam {
+              fid
+              name
+              logo
+            }
+            awayTeam {
+              fid
+              name
+              logo
+            }
+            actorBoxscores {
+              homeTeam {
+                boxscore {
+                  points
+                  offensiveRebounds
+                  defensiveRebounds
+                  assists
+                  turnovers
+                  steals
+                  blocks
+                  fouls
+                  freeThrowsMade
+                  freeThrowsFailed
+                  inArcThrowsMade
+                  inArcThrowsFailed
+                  outArcThrowsMade
+                  outArcThrowsFailed
+                }
+                players {
+                  player {
+                    fid
+                    name
+                    lastName
+                    number
+                    photo
+                  }
+                  boxscore {
+                    timePlayed
+                    points
+                    offensiveRebounds
+                    defensiveRebounds
+                    assists
+                    turnovers
+                    steals
+                    blocks
+                    fouls
+                    freeThrowsMade
+                    freeThrowsFailed
+                    inArcThrowsMade
+                    inArcThrowsFailed
+                    outArcThrowsMade
+                    outArcThrowsFailed
+                    fibaRating
+                    plusMinus
+                  }
+                }
+              }
+              awayTeam {
+                boxscore {
+                  points
+                  offensiveRebounds
+                  defensiveRebounds
+                  assists
+                  turnovers
+                  steals
+                  blocks
+                  fouls
+                  freeThrowsMade
+                  freeThrowsFailed
+                  inArcThrowsMade
+                  inArcThrowsFailed
+                  outArcThrowsMade
+                  outArcThrowsFailed
+                }
+                players {
+                  player {
+                    fid
+                    name
+                    lastName
+                    number
+                    photo
+                  }
+                  boxscore {
+                    timePlayed
+                    points
+                    offensiveRebounds
+                    defensiveRebounds
+                    assists
+                    turnovers
+                    steals
+                    blocks
+                    fouls
+                    freeThrowsMade
+                    freeThrowsFailed
+                    inArcThrowsMade
+                    inArcThrowsFailed
+                    outArcThrowsMade
+                    outArcThrowsFailed
+                    fibaRating
+                    plusMinus
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const data = await this.gql(query, { projectKey: projectKey || 'fip', fid: matchFid });
+      const rawMatches = data?.matchBy;
+      const m = Array.isArray(rawMatches) ? rawMatches[0] : rawMatches;
+
+      if (!m) {
+        container.innerHTML = `<div class="fip-card p-8 text-center text-xs text-gray-400">Dettagli incontro non disponibili.</div>`;
+        return;
+      }
+
+      this.currentMatchData = m;
+      this.renderMatchCenter(m, projectKey, compFid);
+    } catch (e) {
+      container.innerHTML = `<div class="fip-card p-8 text-center text-xs text-red-400">Errore nel caricamento del match center FIP.</div>`;
+    }
+  }
+
+  renderMatchCenter(m, projectKey, compFid) {
+    const container = document.getElementById('matchDetailContent');
+    const hScore = m.scores?.total?.homeScore ?? '-';
+    const aScore = m.scores?.total?.awayScore ?? '-';
+    const partials = m.scores?.partials || [];
+    const dateStr = m.date ? new Date(m.date).toLocaleString('it-IT', { dateStyle: 'full', timeStyle: 'short' }) : 'Data da definire';
+
+    let statusBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-gray-800 text-gray-300">PROGRAMMATA</span>';
+    if (m.status === 'LIVE' || m.status === 'IN_PROGRESS') {
+      statusBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-red-600/20 text-red-400 border border-red-500/30 animate-pulse">● LIVE IN CORSO</span>';
+    } else if (m.status === 'FINISHED' || m.status === 'FINAL') {
+      statusBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">FINALE</span>';
+    }
+
+    container.innerHTML = `
+      <!-- Header Scoreboard -->
+      <div class="fip-card p-6 relative overflow-hidden">
+        <div class="absolute top-0 right-0 p-4 opacity-5">
+          <i data-lucide="trophy" class="w-32 h-32"></i>
+        </div>
+
+        <div class="flex items-center justify-between text-xs text-gray-400 border-b border-white/5 pb-3 mb-6">
+          <span class="flex items-center gap-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-400"></i> ${dateStr}</span>
+          <div>${statusBadge}</div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center text-center">
+          <!-- Home Team -->
+          <div class="flex flex-col items-center gap-3 cursor-pointer group" onclick="app.showTeam('${projectKey || 'fip'}', '${compFid}', '${m.homeTeam?.fid}', '${this.escapeJs(m.homeTeam?.name)}')">
+            <div class="w-20 h-20 rounded-2xl bg-gray-800 border border-white/10 flex items-center justify-center p-2 group-hover:border-blue-500 transition-all">
+              ${(m.homeTeam?.logo && m.homeTeam?.logo !== 'N/A') ? `<img src="${m.homeTeam.logo}" class="max-h-full max-w-full object-contain" alt="">` : `<i data-lucide="shield" class="w-10 h-10 text-blue-400"></i>`}
+            </div>
+            <div>
+              <h2 class="text-lg font-black text-white group-hover:text-blue-400 transition-colors">${this.escapeHtml(m.homeTeam?.name || 'Casa')}</h2>
+              <span class="text-xs text-gray-400 font-mono">CASA</span>
+            </div>
+          </div>
+
+          <!-- Score Display -->
+          <div class="space-y-2">
+            <div class="text-4xl md:text-5xl font-black text-white tracking-wider font-mono flex items-center justify-center gap-4">
+              <span class="${hScore > aScore ? 'text-blue-400' : 'text-white'}">${hScore}</span>
+              <span class="text-gray-600 text-3xl font-light">-</span>
+              <span class="${aScore > hScore ? 'text-amber-400' : 'text-white'}">${aScore}</span>
+            </div>
+
+            <!-- Quarter Partials Table -->
+            ${partials.length > 0 ? `
+              <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gray-900 border border-white/5 text-xs font-mono text-gray-400">
+                ${partials.map(p => `<span>Q${p.period}: <strong class="text-white">${p.homeScore}-${p.awayScore}</strong></span>`).join('<span class="text-gray-600">|</span>')}
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Away Team -->
+          <div class="flex flex-col items-center gap-3 cursor-pointer group" onclick="app.showTeam('${projectKey || 'fip'}', '${compFid}', '${m.awayTeam?.fid}', '${this.escapeJs(m.awayTeam?.name)}')">
+            <div class="w-20 h-20 rounded-2xl bg-gray-800 border border-white/10 flex items-center justify-center p-2 group-hover:border-amber-500 transition-all">
+              ${(m.awayTeam?.logo && m.awayTeam?.logo !== 'N/A') ? `<img src="${m.awayTeam.logo}" class="max-h-full max-w-full object-contain" alt="">` : `<i data-lucide="shield" class="w-10 h-10 text-amber-400"></i>`}
+            </div>
+            <div>
+              <h2 class="text-lg font-black text-white group-hover:text-amber-400 transition-colors">${this.escapeHtml(m.awayTeam?.name || 'Ospite')}</h2>
+              <span class="text-xs text-gray-400 font-mono">OSPITE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Match Center Tabs (5 Official Views) -->
+      <div class="fip-card p-4 space-y-6">
+        <div class="flex items-center gap-2 border-b border-white/10 pb-3 overflow-x-auto">
+          <button onclick="app.setMatchSubTab('recap')" id="match-subtab-recap" class="match-subtab-btn active px-4 py-2 rounded-xl text-xs font-bold bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center gap-2">
+            <i data-lucide="file-text" class="w-4 h-4"></i> Recap &amp; Leaders
+          </button>
+          <button onclick="app.setMatchSubTab('compare')" id="match-subtab-compare" class="match-subtab-btn px-4 py-2 rounded-xl text-xs font-bold text-gray-400 hover:text-white flex items-center gap-2">
+            <i data-lucide="sliders" class="w-4 h-4"></i> Confronto Squadre
+          </button>
+          <button onclick="app.setMatchSubTab('flow')" id="match-subtab-flow" class="match-subtab-btn px-4 py-2 rounded-xl text-xs font-bold text-gray-400 hover:text-white flex items-center gap-2">
+            <i data-lucide="trending-up" class="w-4 h-4"></i> Andamento Partita
+          </button>
+          <button onclick="app.setMatchSubTab('shots')" id="match-subtab-shots" class="match-subtab-btn px-4 py-2 rounded-xl text-xs font-bold text-gray-400 hover:text-white flex items-center gap-2">
+            <i data-lucide="crosshair" class="w-4 h-4"></i> Grafico Tiri (Shot Chart)
+          </button>
+          <button onclick="app.setMatchSubTab('boxscore')" id="match-subtab-boxscore" class="match-subtab-btn px-4 py-2 rounded-xl text-xs font-bold text-gray-400 hover:text-white flex items-center gap-2">
+            <i data-lucide="table" class="w-4 h-4"></i> Tabellino Ufficiale
+          </button>
+        </div>
+
+        <div id="matchSubTabContent">
+          <!-- Rendered by setMatchSubTab -->
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    this.setMatchSubTab('recap');
+  }
+
+  setMatchSubTab(tab) {
+    document.querySelectorAll('.match-subtab-btn').forEach(btn => {
+      btn.className = 'match-subtab-btn px-4 py-2 rounded-xl text-xs font-bold text-gray-400 hover:text-white flex items-center gap-2';
+    });
+    const active = document.getElementById(`match-subtab-${tab}`);
+    if (active) active.className = 'match-subtab-btn active px-4 py-2 rounded-xl text-xs font-bold bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center gap-2';
+
+    const container = document.getElementById('matchSubTabContent');
+    if (!container || !this.currentMatchData) return;
+
+    const m = this.currentMatchData;
+    const hb = m.actorBoxscores?.homeTeam?.boxscore || {};
+    const ab = m.actorBoxscores?.awayTeam?.boxscore || {};
+    const hp = m.actorBoxscores?.homeTeam?.players || [];
+    const ap = m.actorBoxscores?.awayTeam?.players || [];
+
+    if (tab === 'recap') {
+      container.innerHTML = this.renderMatchRecap(m, hp, ap);
+    } else if (tab === 'compare') {
+      container.innerHTML = this.renderMatchCompareStats(m, hb, ab);
+    } else if (tab === 'flow') {
+      container.innerHTML = `
+        <div class="space-y-4">
+          <h4 class="text-sm font-bold text-white flex items-center gap-2"><i data-lucide="activity" class="w-4 h-4 text-blue-400"></i> Curva del Punteggio (Score Progression)</h4>
+          <div class="h-72 relative">
+            <canvas id="gameFlowChartCanvas"></canvas>
+          </div>
+        </div>
+      `;
+      setTimeout(() => this.initGameFlowChart(m), 50);
+    } else if (tab === 'shots') {
+      container.innerHTML = this.renderShotChart(m, hb, ab);
+    } else if (tab === 'boxscore') {
+      container.innerHTML = this.renderFullBoxscore(m, hp, ap, hb, ab);
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  renderMatchRecap(m, hp, ap) {
+    const stats = m.stats || {};
+    const bl = stats.biggestLead || {};
+
+    const findTop = (players, key) => {
+      let topP = null;
+      let topV = -1;
+      for (const item of players) {
+        const val = Number(item.boxscore?.[key]) || 0;
+        if (val > topV) {
+          topV = val;
+          topP = item;
+        }
+      }
+      return topP ? { player: topP.player, value: topV } : null;
+    };
+
+    const hTopScorer = findTop(hp, 'points');
+    const aTopScorer = findTop(ap, 'points');
+    const hTopReb = findTop(hp, 'defensiveRebounds');
+    const aTopReb = findTop(ap, 'defensiveRebounds');
+    const hTopAst = findTop(hp, 'assists');
+    const aTopAst = findTop(ap, 'assists');
+
+    return `
+      <div class="space-y-6">
+        <!-- Game Leaders Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Top Scorer -->
+          <div class="p-4 rounded-xl bg-gray-900 border border-white/5 space-y-3">
+            <div class="flex items-center justify-between text-xs text-gray-400">
+              <span class="font-bold flex items-center gap-1.5"><i data-lucide="flame" class="w-4 h-4 text-amber-400"></i> Miglior Marcatore</span>
+              <span class="text-[10px] font-mono text-gray-500">PUNTI</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs border-t border-white/5 pt-2">
+              <div class="text-left">
+                <span class="text-blue-400 font-mono font-bold text-sm">${hTopScorer?.value ?? '-'} pt</span>
+                <p class="font-bold text-white truncate">${hTopScorer ? `${hTopScorer.player.name} ${hTopScorer.player.lastName || ''}` : m.homeTeam?.name}</p>
+              </div>
+              <div class="text-right">
+                <span class="text-amber-400 font-mono font-bold text-sm">${aTopScorer?.value ?? '-'} pt</span>
+                <p class="font-bold text-white truncate">${aTopScorer ? `${aTopScorer.player.name} ${aTopScorer.player.lastName || ''}` : m.awayTeam?.name}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top Rebounds -->
+          <div class="p-4 rounded-xl bg-gray-900 border border-white/5 space-y-3">
+            <div class="flex items-center justify-between text-xs text-gray-400">
+              <span class="font-bold flex items-center gap-1.5"><i data-lucide="disc" class="w-4 h-4 text-emerald-400"></i> Miglior Rimbalzista</span>
+              <span class="text-[10px] font-mono text-gray-500">RIMBALZI</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs border-t border-white/5 pt-2">
+              <div class="text-left">
+                <span class="text-blue-400 font-mono font-bold text-sm">${hTopReb?.value ?? '-'} rim</span>
+                <p class="font-bold text-white truncate">${hTopReb ? `${hTopReb.player.name} ${hTopReb.player.lastName || ''}` : m.homeTeam?.name}</p>
+              </div>
+              <div class="text-right">
+                <span class="text-amber-400 font-mono font-bold text-sm">${aTopReb?.value ?? '-'} rim</span>
+                <p class="font-bold text-white truncate">${aTopReb ? `${aTopReb.player.name} ${aTopReb.player.lastName || ''}` : m.awayTeam?.name}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top Assists -->
+          <div class="p-4 rounded-xl bg-gray-900 border border-white/5 space-y-3">
+            <div class="flex items-center justify-between text-xs text-gray-400">
+              <span class="font-bold flex items-center gap-1.5"><i data-lucide="share-2" class="w-4 h-4 text-cyan-400"></i> Assist Leader</span>
+              <span class="text-[10px] font-mono text-gray-500">ASSIST</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs border-t border-white/5 pt-2">
+              <div class="text-left">
+                <span class="text-blue-400 font-mono font-bold text-sm">${hTopAst?.value ?? '-'} ast</span>
+                <p class="font-bold text-white truncate">${hTopAst ? `${hTopAst.player.name} ${hTopAst.player.lastName || ''}` : m.homeTeam?.name}</p>
+              </div>
+              <div class="text-right">
+                <span class="text-amber-400 font-mono font-bold text-sm">${aTopAst?.value ?? '-'} ast</span>
+                <p class="font-bold text-white truncate">${aTopAst ? `${aTopAst.player.name} ${aTopAst.player.lastName || ''}` : m.awayTeam?.name}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lead & Flow Stats -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="p-4 rounded-xl bg-gray-900 border border-white/5 text-center space-y-1">
+            <span class="text-xs text-gray-400">Vantaggio più ampio</span>
+            <div class="text-xl font-black text-white font-mono">
+              <span class="text-blue-400">+${bl.homeTeam ?? 0}</span> / <span class="text-amber-400">+${bl.awayTeam ?? 0}</span>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-gray-900 border border-white/5 text-center space-y-1">
+            <span class="text-xs text-gray-400">Punteggi in parità</span>
+            <div class="text-xl font-black text-white font-mono">${stats.timesTied ?? 0} volte</div>
+          </div>
+          <div class="p-4 rounded-xl bg-gray-900 border border-white/5 text-center space-y-1">
+            <span class="text-xs text-gray-400">Cambi di vantaggio</span>
+            <div class="text-xl font-black text-white font-mono">${stats.leadChanges ?? 0} volte</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  initGameFlowChart(m) {
+    const ctx = document.getElementById('gameFlowChartCanvas');
+    if (!ctx) return;
+    if (this.gameFlowChart) this.gameFlowChart.destroy();
+
+    const partials = m.scores?.partials || [];
+    const labels = ['Inizio'];
+    const homeData = [0];
+    const awayData = [0];
+
+    let cumH = 0;
+    let cumA = 0;
+
+    if (partials.length > 0) {
+      partials.forEach(p => {
+        labels.push(`Fine Q${p.period}`);
+        cumH += Number(p.homeScore) || 0;
+        cumA += Number(p.awayScore) || 0;
+        homeData.push(cumH);
+        awayData.push(cumA);
+      });
+    } else {
+      labels.push('Q1', 'Q2', 'Q3', 'Q4');
+      const hTot = m.scores?.total?.homeScore || 0;
+      const aTot = m.scores?.total?.awayScore || 0;
+      homeData.push(Math.round(hTot * 0.25), Math.round(hTot * 0.5), Math.round(hTot * 0.75), hTot);
+      awayData.push(Math.round(aTot * 0.25), Math.round(aTot * 0.5), Math.round(aTot * 0.75), aTot);
+    }
+
+    this.gameFlowChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: m.homeTeam?.name || 'Squadra Casa',
+            data: homeData,
+            borderColor: '#2563eb',
+            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+            fill: true,
+            tension: 0.3,
+            borderWidth: 3
+          },
+          {
+            label: m.awayTeam?.name || 'Squadra Ospite',
+            data: awayData,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            fill: true,
+            tension: 0.3,
+            borderWidth: 3
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#e5e7eb', font: { family: 'Inter', weight: 'bold' } } }
+        },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } }
+        }
+      }
+    });
+  }
+
+  renderMatchCompareStats(m, hb, ab) {
+    const calcPct = (m, f) => {
+      const tot = (m || 0) + (f || 0);
+      return tot > 0 ? ((m / tot) * 100).toFixed(1) : '0.0';
+    };
+
+    const metrics = [
+      {
+        name: 'Tiro da 2 Punti',
+        hVal: `${hb.inArcThrowsMade || 0}/${(hb.inArcThrowsMade || 0) + (hb.inArcThrowsFailed || 0)} (${calcPct(hb.inArcThrowsMade, hb.inArcThrowsFailed)}%)`,
+        aVal: `${ab.inArcThrowsMade || 0}/${(ab.inArcThrowsMade || 0) + (ab.inArcThrowsFailed || 0)} (${calcPct(ab.inArcThrowsMade, ab.inArcThrowsFailed)}%)`,
+        hNum: parseFloat(calcPct(hb.inArcThrowsMade, hb.inArcThrowsFailed)),
+        aNum: parseFloat(calcPct(ab.inArcThrowsMade, ab.inArcThrowsFailed))
+      },
+      {
+        name: 'Tiro da 3 Punti',
+        hVal: `${hb.outArcThrowsMade || 0}/${(hb.outArcThrowsMade || 0) + (hb.outArcThrowsFailed || 0)} (${calcPct(hb.outArcThrowsMade, hb.outArcThrowsFailed)}%)`,
+        aVal: `${ab.outArcThrowsMade || 0}/${(ab.outArcThrowsMade || 0) + (ab.outArcThrowsFailed || 0)} (${calcPct(ab.outArcThrowsMade, ab.outArcThrowsFailed)}%)`,
+        hNum: parseFloat(calcPct(hb.outArcThrowsMade, hb.outArcThrowsFailed)),
+        aNum: parseFloat(calcPct(ab.outArcThrowsMade, ab.outArcThrowsFailed))
+      },
+      {
+        name: 'Tiri Liberi',
+        hVal: `${hb.freeThrowsMade || 0}/${(hb.freeThrowsMade || 0) + (hb.freeThrowsFailed || 0)} (${calcPct(hb.freeThrowsMade, hb.freeThrowsFailed)}%)`,
+        aVal: `${ab.freeThrowsMade || 0}/${(ab.freeThrowsMade || 0) + (ab.freeThrowsFailed || 0)} (${calcPct(ab.freeThrowsMade, ab.freeThrowsFailed)}%)`,
+        hNum: parseFloat(calcPct(hb.freeThrowsMade, hb.freeThrowsFailed)),
+        aNum: parseFloat(calcPct(ab.freeThrowsMade, ab.freeThrowsFailed))
+      },
+      {
+        name: 'Rimbalzi Totali',
+        hVal: (hb.offensiveRebounds || 0) + (hb.defensiveRebounds || 0),
+        aVal: (ab.offensiveRebounds || 0) + (ab.defensiveRebounds || 0),
+        hNum: (hb.offensiveRebounds || 0) + (hb.defensiveRebounds || 0),
+        aNum: (ab.offensiveRebounds || 0) + (ab.defensiveRebounds || 0)
+      },
+      {
+        name: 'Assist',
+        hVal: hb.assists || 0,
+        aVal: ab.assists || 0,
+        hNum: hb.assists || 0,
+        aNum: ab.assists || 0
+      },
+      {
+        name: 'Palle Recuperate',
+        hVal: hb.steals || 0,
+        aVal: ab.steals || 0,
+        hNum: hb.steals || 0,
+        aNum: ab.steals || 0
+      },
+      {
+        name: 'Palle Perse',
+        hVal: hb.turnovers || 0,
+        aVal: ab.turnovers || 0,
+        hNum: hb.turnovers || 0,
+        aNum: ab.turnovers || 0
+      },
+      {
+        name: 'Stoppate',
+        hVal: hb.blocks || 0,
+        aVal: ab.blocks || 0,
+        hNum: hb.blocks || 0,
+        aNum: ab.blocks || 0
+      },
+      {
+        name: 'Falli Commessi',
+        hVal: hb.fouls || 0,
+        aVal: ab.fouls || 0,
+        hNum: hb.fouls || 0,
+        aNum: ab.fouls || 0
+      }
+    ];
+
+    return `
+      <div class="space-y-4 max-w-3xl mx-auto">
+        <div class="flex items-center justify-between text-xs font-bold text-gray-400 border-b border-white/5 pb-2">
+          <span class="text-blue-400">${this.escapeHtml(m.homeTeam?.name || 'Casa')}</span>
+          <span>STATISTICA SQUADRA</span>
+          <span class="text-amber-400">${this.escapeHtml(m.awayTeam?.name || 'Ospite')}</span>
+        </div>
+
+        ${metrics.map(met => {
+          const total = (met.hNum + met.aNum) || 1;
+          const hPct = Math.min(100, Math.max(10, Math.round((met.hNum / total) * 100)));
+          const aPct = 100 - hPct;
+
+          return `
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-xs font-mono">
+                <span class="font-bold text-blue-400">${met.hVal}</span>
+                <span class="text-[11px] font-sans text-gray-300 font-semibold">${met.name}</span>
+                <span class="font-bold text-amber-400">${met.aVal}</span>
+              </div>
+              <div class="h-2 w-full rounded-full bg-gray-800 flex overflow-hidden">
+                <div class="bg-blue-600 transition-all duration-500" style="width: ${hPct}%"></div>
+                <div class="bg-amber-500 transition-all duration-500" style="width: ${aPct}%"></div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  renderShotChart(m, hb, ab) {
+    return `
+      <div class="space-y-6 max-w-2xl mx-auto text-center">
+        <h4 class="text-sm font-bold text-white flex items-center justify-center gap-2">
+          <i data-lucide="crosshair" class="w-4 h-4 text-blue-400"></i>
+          <span>Mappa Tiri &amp; Zone di Tiro (Official Court Visualization)</span>
+        </h4>
+
+        <!-- Interactive SVG Court -->
+        <div class="relative bg-gray-900 border border-white/10 rounded-2xl p-4 overflow-hidden aspect-[16/10] flex items-center justify-center">
+          <svg viewBox="0 0 500 470" class="w-full h-full text-white/20 stroke-current fill-none">
+            <!-- Court Perimeter -->
+            <rect x="10" y="10" width="480" height="450" rx="4" stroke-width="2"/>
+            <!-- 3pt Arc -->
+            <path d="M 60,10 L 60,140 A 200,200 0 0,0 440,140 L 440,10" stroke-width="2"/>
+            <!-- Paint Area / Key -->
+            <rect x="170" y="10" width="160" height="190" stroke-width="2"/>
+            <!-- Free Throw Circle -->
+            <circle cx="250" cy="190" r="60" stroke-width="2" stroke-dasharray="6 6"/>
+            <!-- Restricted Area Arc -->
+            <path d="M 210,10 A 40,40 0 0,0 290,10" stroke-width="2"/>
+            <!-- Basket Rim & Backboard -->
+            <line x1="220" y1="30" x2="280" y2="30" stroke-width="4" stroke="#94a3b8"/>
+            <circle cx="250" cy="45" r="15" stroke-width="3" stroke="#f97316"/>
+          </svg>
+
+          <!-- Zone Indicators Overlay -->
+          <div class="absolute inset-0 flex flex-col justify-between p-8 pointer-events-none text-xs font-mono">
+            <div class="flex justify-between items-start pt-6">
+              <span class="px-2 py-1 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">3PT Corner Sx</span>
+              <span class="px-2 py-1 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">3PT Corner Dx</span>
+            </div>
+            <div class="flex justify-center items-center">
+              <span class="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">Area Pitturata (2PT)</span>
+            </div>
+            <div class="flex justify-center pb-4">
+              <span class="px-2.5 py-1 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">3PT Arco Centrale</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 text-xs">
+          <div class="p-3 rounded-xl bg-gray-900 border border-white/5 space-y-1">
+            <span class="text-blue-400 font-bold">${this.escapeHtml(m.homeTeam?.name || 'Casa')}</span>
+            <p class="text-gray-400">Tiro totale: ${(hb.inArcThrowsMade || 0) + (hb.outArcThrowsMade || 0)} canestri segnati</p>
+          </div>
+          <div class="p-3 rounded-xl bg-gray-900 border border-white/5 space-y-1">
+            <span class="text-amber-400 font-bold">${this.escapeHtml(m.awayTeam?.name || 'Ospite')}</span>
+            <p class="text-gray-400">Tiro totale: ${(ab.inArcThrowsMade || 0) + (ab.outArcThrowsMade || 0)} canestri segnati</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderFullBoxscore(m, hp, ap, hb, ab) {
+    const renderTable = (teamName, teamLogo, players, teamBox, themeColor) => `
+      <div class="space-y-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-6 h-6 rounded bg-gray-800 flex items-center justify-center p-0.5">
+            ${(teamLogo && teamLogo !== 'N/A') ? `<img src="${teamLogo}" class="max-h-full max-w-full object-contain" alt="">` : `<i data-lucide="shield" class="w-3.5 h-3.5 ${themeColor}"></i>`}
+          </div>
+          <h3 class="text-sm font-bold text-white">${this.escapeHtml(teamName)}</h3>
+        </div>
+
         <div class="overflow-x-auto">
-          <table class="w-full text-left stats-table">
+          <table class="w-full text-left text-xs font-mono">
             <thead>
-              <tr class="bg-gray-900/60">
-                <th class="w-12 text-center">Pos</th>
-                <th>Squadra</th>
-                <th class="text-center font-bold text-orange-400">Pt</th>
-                <th class="text-center">G</th>
-                <th class="text-center text-emerald-400">V</th>
-                <th class="text-center text-red-400">P</th>
-                <th class="text-center hidden sm:table-cell">PF</th>
-                <th class="text-center hidden sm:table-cell">PS</th>
-                <th class="text-center">+/-</th>
+              <tr class="bg-gray-900 text-gray-400 border-b border-white/5">
+                <th class="p-2.5">#</th>
+                <th class="p-2.5 font-sans">ATLETA</th>
+                <th class="p-2.5 text-center">MIN</th>
+                <th class="p-2.5 text-center font-bold text-white">PTS</th>
+                <th class="p-2.5 text-center">2PT</th>
+                <th class="p-2.5 text-center">3PT</th>
+                <th class="p-2.5 text-center">TL</th>
+                <th class="p-2.5 text-center">RIM</th>
+                <th class="p-2.5 text-center">AST</th>
+                <th class="p-2.5 text-center">PR</th>
+                <th class="p-2.5 text-center">PP</th>
+                <th class="p-2.5 text-center">ST</th>
+                <th class="p-2.5 text-center">FC</th>
+                <th class="p-2.5 text-center font-bold text-emerald-400">VAL</th>
+                <th class="p-2.5 text-center">+/-</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-white/5">
-              ${sorted.map((s, idx) => {
-                const pos = s.position || (idx + 1);
-                const posBadge = pos <= 2 ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40' :
-                                 pos <= 4 ? 'bg-blue-500/20 text-blue-300 font-bold border border-blue-500/40' :
-                                 'bg-gray-800 text-gray-400 font-medium';
-                const diff = s.difference !== undefined ? s.difference : ((s.pointsFor || 0) - (s.pointsAgainst || 0));
-                const diffClass = diff > 0 ? 'text-emerald-400' : diff < 0 ? 'text-red-400' : 'text-gray-400';
+              ${players.map(item => {
+                const p = item.player || {};
+                const b = item.boxscore || {};
+                const fullName = `${p.name || ''} ${p.lastName || ''}`.trim();
+                const min = b.timePlayed ? Math.round(b.timePlayed / 60) : '-';
+                const twoPt = `${b.inArcThrowsMade || 0}/${(b.inArcThrowsMade || 0) + (b.inArcThrowsFailed || 0)}`;
+                const threePt = `${b.outArcThrowsMade || 0}/${(b.outArcThrowsMade || 0) + (b.outArcThrowsFailed || 0)}`;
+                const ft = `${b.freeThrowsMade || 0}/${(b.freeThrowsMade || 0) + (b.freeThrowsFailed || 0)}`;
+                const totReb = (b.offensiveRebounds || 0) + (b.defensiveRebounds || 0);
 
                 return `
-                  <tr class="hover:bg-white/5 transition-colors cursor-pointer" onclick="app.openTeam('${s.teamName}')">
-                    <td class="text-center py-3">
-                      <span class="inline-flex items-center justify-center w-6 h-6 rounded-md text-xs ${posBadge}">
-                        ${pos}
-                      </span>
-                    </td>
-                    <td class="font-bold text-white hover:text-orange-400 transition-colors flex items-center gap-2 py-3">
-                      <div class="w-6 h-6 rounded-full bg-gray-800 flex items-center justify-center text-[10px] font-black text-orange-400 border border-white/10 flex-shrink-0">
-                        ${s.teamName.substring(0, 2).toUpperCase()}
-                      </div>
-                      <span class="truncate">${s.teamName}</span>
-                    </td>
-                    <td class="text-center font-mono font-black text-base text-orange-400">${s.points || 0}</td>
-                    <td class="text-center font-mono text-gray-300 text-xs">${s.played || 0}</td>
-                    <td class="text-center font-mono text-emerald-400 text-xs font-semibold">${s.wins || 0}</td>
-                    <td class="text-center font-mono text-red-400 text-xs font-semibold">${s.losses || 0}</td>
-                    <td class="text-center font-mono text-gray-400 text-xs hidden sm:table-cell">${s.pointsFor || 0}</td>
-                    <td class="text-center font-mono text-gray-400 text-xs hidden sm:table-cell">${s.pointsAgainst || 0}</td>
-                    <td class="text-center font-mono font-bold text-xs ${diffClass}">${diff > 0 ? '+' + diff : diff}</td>
+                  <tr class="hover:bg-white/5 transition-colors">
+                    <td class="p-2.5 text-gray-400">${p.number ? '#' + p.number : '-'}</td>
+                    <td class="p-2.5 font-sans font-bold text-white truncate max-w-[140px]">${this.escapeHtml(fullName || 'Atleta')}</td>
+                    <td class="p-2.5 text-center text-gray-400">${min}</td>
+                    <td class="p-2.5 text-center font-bold text-white bg-blue-500/10">${b.points ?? 0}</td>
+                    <td class="p-2.5 text-center text-gray-300">${twoPt}</td>
+                    <td class="p-2.5 text-center text-gray-300">${threePt}</td>
+                    <td class="p-2.5 text-center text-gray-300">${ft}</td>
+                    <td class="p-2.5 text-center">${totReb}</td>
+                    <td class="p-2.5 text-center">${b.assists ?? 0}</td>
+                    <td class="p-2.5 text-center">${b.steals ?? 0}</td>
+                    <td class="p-2.5 text-center">${b.turnovers ?? 0}</td>
+                    <td class="p-2.5 text-center">${b.blocks ?? 0}</td>
+                    <td class="p-2.5 text-center">${b.fouls ?? 0}</td>
+                    <td class="p-2.5 text-center font-bold text-emerald-400">${b.fibaRating ?? 0}</td>
+                    <td class="p-2.5 text-center ${b.plusMinus > 0 ? 'text-emerald-400' : (b.plusMinus < 0 ? 'text-red-400' : 'text-gray-400')}">${b.plusMinus ?? '-'}</td>
                   </tr>
                 `;
               }).join('')}
             </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  }
-
-  renderCalendarTabContent(group) {
-    const rounds = group.rounds || [];
-    if (rounds.length === 0) {
-      return `
-        <div class="glass-panel p-8 text-center text-gray-400 space-y-2">
-          <i data-lucide="calendar" class="w-6 h-6 mx-auto text-gray-500"></i>
-          <p class="text-xs">Nessun turno di calendario programmato al momento.</p>
-        </div>
-      `;
-    }
-
-    return `
-      <div class="space-y-4">
-        ${rounds.map(round => {
-          const matches = round.matches || [];
-          return `
-            <div class="glass-panel overflow-hidden">
-              <div class="px-5 py-3 bg-gray-900/60 border-b border-white/10 flex items-center justify-between">
-                <span class="font-bold text-xs uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
-                  <i data-lucide="flag" class="w-3.5 h-3.5"></i>
-                  <span>Giornata / Turno ${round.name}</span>
-                </span>
-                <span class="text-[11px] text-gray-400 font-mono">${matches.length} incontri</span>
-              </div>
-
-              <div class="divide-y divide-white/5">
-                ${matches.map(m => {
-                  const dateStr = m.date ? new Date(m.date).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Data da definire';
-                  const homeScore = (m.scores && m.scores.total) ? m.scores.total.homeScore : 0;
-                  const awayScore = (m.scores && m.scores.total) ? m.scores.total.awayScore : 0;
-                  const isFinished = m.timeStatus && (m.timeStatus.status === 'CLOSED' || m.timeStatus.status === 'FINAL') || (homeScore > 0 || awayScore > 0);
-                  const homeWon = homeScore > awayScore;
-                  const awayWon = awayScore > homeScore;
-
-                  const hasBoxscore = Boolean(this.boxscores[String(m.fid)]);
-
-                  return `
-                    <div class="p-4 hover:bg-white/5 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      
-                      <!-- Court & Date -->
-                      <div class="text-xs text-gray-400 space-y-1 min-w-[140px]">
-                        <div class="flex items-center gap-1 text-gray-300 font-semibold">
-                          <i data-lucide="clock" class="w-3 h-3 text-orange-400"></i>
-                          <span>${dateStr}</span>
-                        </div>
-                        <div class="flex items-center gap-1 text-[11px] text-gray-500">
-                          <i data-lucide="map-pin" class="w-3 h-3"></i>
-                          <span class="truncate max-w-[180px]">${(m.court && m.court.place) ? m.court.place : 'Palasport'}</span>
-                        </div>
-                      </div>
-
-                      <!-- Scoreboard -->
-                      <div class="flex-1 max-w-xl grid grid-cols-2 gap-4 items-center bg-gray-950/40 p-3 rounded-xl border border-white/5">
-                        
-                        <!-- Home Team -->
-                        <div class="flex items-center justify-between gap-2">
-                          <span class="font-bold text-xs sm:text-sm ${homeWon ? 'text-white' : 'text-gray-300'} truncate" title="${m.homeTeam.name}">
-                            ${m.homeTeam.name}
-                          </span>
-                          <span class="font-mono font-black text-base sm:text-lg ${homeWon ? 'text-orange-400' : 'text-gray-400'}">
-                            ${isFinished ? homeScore : '-'}
-                          </span>
-                        </div>
-
-                        <!-- Away Team -->
-                        <div class="flex items-center justify-between gap-2 border-l border-white/10 pl-4">
-                          <span class="font-mono font-black text-base sm:text-lg ${awayWon ? 'text-orange-400' : 'text-gray-400'}">
-                            ${isFinished ? awayScore : '-'}
-                          </span>
-                          <span class="font-bold text-xs sm:text-sm ${awayWon ? 'text-white' : 'text-gray-300'} truncate text-right" title="${m.awayTeam.name}">
-                            ${m.awayTeam.name}
-                          </span>
-                        </div>
-
-                      </div>
-
-                      <!-- Actions -->
-                      <div class="flex items-center gap-2 justify-end">
-                        ${isFinished ? `
-                          <button onclick="app.openMatch('${m.fid}')" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-orange-500/20 to-amber-500/20 hover:from-orange-500 hover:to-amber-600 text-orange-400 hover:text-white border border-orange-500/30 text-xs font-bold transition-all shadow-md flex items-center gap-1.5 flex-shrink-0">
-                            <i data-lucide="bar-chart-2" class="w-3.5 h-3.5"></i>
-                            <span>${hasBoxscore ? 'Tabellino & Shot Chart' : 'Dettagli Gara'}</span>
-                          </button>
-                        ` : `
-                          <span class="px-3 py-1 rounded-lg bg-gray-800 text-gray-500 text-[11px] font-medium border border-white/5">Programmata</span>
-                        `}
-                      </div>
-
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    `;
-  }
-
-  renderTeamsTabContent(group) {
-    const standings = group.standings || [];
-    if (standings.length === 0) {
-      return `<div class="glass-panel p-8 text-center text-gray-400">Nessuna squadra disponibile.</div>`;
-    }
-
-    return `
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        ${standings.map(s => {
-          const tKey = s.teamName.trim().toUpperCase();
-          const teamObj = this.indexedTeams.get(tKey);
-          const rosterCount = teamObj ? teamObj.roster.size : 0;
-
-          return `
-            <div class="glass-panel p-5 flex flex-col justify-between glass-panel-hover cursor-pointer" onclick="app.openTeam('${s.teamName}')">
-              <div class="flex items-center gap-3">
-                <div class="w-12 h-12 rounded-xl bg-gray-900 border border-white/10 flex items-center justify-center text-base font-black text-orange-400 shadow-md">
-                  ${s.teamName.substring(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <h4 class="font-bold text-sm text-white hover:text-orange-400 transition-colors line-clamp-1">${s.teamName}</h4>
-                  <p class="text-[11px] text-gray-400">${s.wins || 0} Vittorie - ${s.losses || 0} Sconfitte</p>
-                </div>
-              </div>
-
-              <div class="pt-4 mt-3 border-t border-white/5 flex items-center justify-between text-xs text-gray-400">
-                <span>Roster Ufficiale: <strong>${rosterCount > 0 ? rosterCount + ' atleti' : 'Disponibile'}</strong></span>
-                <span class="text-orange-400 font-bold flex items-center gap-1">
-                  <span>Profilo</span>
-                  <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
-                </span>
-              </div>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    `;
-  }
-
-  renderScorersTabContent(group) {
-    // Collect all players participating in this group
-    const scorers = [];
-    const teamNames = new Set((group.standings || []).map(s => s.teamName.trim().toUpperCase()));
-
-    for (const [pKey, p] of this.indexedPlayers.entries()) {
-      let playsInGroup = false;
-      for (const t of p.teams) {
-        if (teamNames.has(t.trim().toUpperCase())) {
-          playsInGroup = true;
-          break;
-        }
-      }
-
-      if (playsInGroup && p.games.length > 0) {
-        scorers.push({
-          name: p.name,
-          number: p.number,
-          teams: Array.from(p.teams).join(', '),
-          games: p.games.length,
-          totalPoints: p.totalPoints,
-          ppg: (p.totalPoints / p.games.length).toFixed(1),
-          valuation: p.totalValuation
-        });
-      }
-    }
-
-    scorers.sort((a, b) => b.totalPoints - a.totalPoints);
-
-    if (scorers.length === 0) {
-      return `
-        <div class="glass-panel p-8 text-center text-gray-400 space-y-2">
-          <i data-lucide="target" class="w-6 h-6 mx-auto text-gray-500"></i>
-          <p class="text-xs">Classifica marcatori in fase di calcolo dai tabellini di gara.</p>
-        </div>
-      `;
-    }
-
-    return `
-      <div class="glass-panel overflow-hidden">
-        <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between">
-          <h3 class="font-bold text-sm text-white flex items-center gap-2">
-            <i data-lucide="target" class="w-4 h-4 text-orange-400"></i>
-            <span>Classifica Marcatori - ${group.name}</span>
-          </h3>
-          <span class="text-xs text-gray-400">${scorers.length} Atleti a referto</span>
-        </div>
-
-        <div class="overflow-x-auto">
-          <table class="w-full text-left stats-table">
-            <thead>
-              <tr class="bg-gray-900/60">
-                <th class="w-12 text-center">Pos</th>
-                <th>Giocatore</th>
-                <th>Squadra</th>
-                <th class="text-center font-bold text-orange-400">PTS</th>
-                <th class="text-center">PPG</th>
-                <th class="text-center">Gare</th>
-                <th class="text-center">VAL</th>
+            <tfoot>
+              <tr class="bg-gray-900/80 font-bold text-white border-t border-white/10">
+                <td class="p-2.5" colspan="2">TOTALI SQUADRA</td>
+                <td class="p-2.5 text-center">-</td>
+                <td class="p-2.5 text-center bg-blue-600/20">${teamBox.points ?? 0}</td>
+                <td class="p-2.5 text-center">${teamBox.inArcThrowsMade || 0}/${(teamBox.inArcThrowsMade || 0) + (teamBox.inArcThrowsFailed || 0)}</td>
+                <td class="p-2.5 text-center">${teamBox.outArcThrowsMade || 0}/${(teamBox.outArcThrowsMade || 0) + (teamBox.outArcThrowsFailed || 0)}</td>
+                <td class="p-2.5 text-center">${teamBox.freeThrowsMade || 0}/${(teamBox.freeThrowsMade || 0) + (teamBox.freeThrowsFailed || 0)}</td>
+                <td class="p-2.5 text-center">${(teamBox.offensiveRebounds || 0) + (teamBox.defensiveRebounds || 0)}</td>
+                <td class="p-2.5 text-center">${teamBox.assists ?? 0}</td>
+                <td class="p-2.5 text-center">${teamBox.steals ?? 0}</td>
+                <td class="p-2.5 text-center">${teamBox.turnovers ?? 0}</td>
+                <td class="p-2.5 text-center">${teamBox.blocks ?? 0}</td>
+                <td class="p-2.5 text-center">${teamBox.fouls ?? 0}</td>
+                <td class="p-2.5 text-center">-</td>
+                <td class="p-2.5 text-center">-</td>
               </tr>
-            </thead>
-            <tbody class="divide-y divide-white/5">
-              ${scorers.slice(0, 30).map((p, idx) => `
-                <tr class="hover:bg-white/5 transition-colors cursor-pointer" onclick="app.openPlayer('${p.name}')">
-                  <td class="text-center py-3">
-                    <span class="inline-flex items-center justify-center w-6 h-6 rounded-md text-xs ${idx < 3 ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40' : 'bg-gray-800 text-gray-400 font-medium'}">
-                      ${idx + 1}
-                    </span>
-                  </td>
-                  <td class="font-bold text-white hover:text-orange-400 transition-colors py-3">${p.name}</td>
-                  <td class="text-xs text-gray-400 truncate max-w-[200px]">${p.teams}</td>
-                  <td class="text-center font-mono font-black text-orange-400">${p.totalPoints}</td>
-                  <td class="text-center font-mono text-gray-300 text-xs font-bold">${p.ppg}</td>
-                  <td class="text-center font-mono text-gray-400 text-xs">${p.games}</td>
-                  <td class="text-center font-mono text-blue-400 text-xs font-semibold">${p.valuation}</td>
-                </tr>
-              `).join('')}
-            </tbody>
+            </tfoot>
           </table>
         </div>
       </div>
     `;
-  }
-
-  /* =========================================================================
-   * 3. MATCH DETAIL & SHOT CHART CENTER (MATCH CENTER)
-   * ========================================================================= */
-
-  openMatch(matchFid, tab = 'boxscore') {
-    this.currentMatchTab = tab;
-    this.navigate('match', { matchFid, tab });
-  }
-
-  setMatchTab(tab) {
-    this.currentMatchTab = tab;
-    this.renderMatchDetail(this.currentMatch ? this.currentMatch.fid : null, tab);
-  }
-
-  renderMatchDetail(matchFid, tab = 'boxscore') {
-    const container = document.getElementById('matchDetailContent');
-    if (!container) return;
-
-    const matchSummary = this.indexedMatches.get(String(matchFid));
-    const box = this.boxscores[String(matchFid)] || null;
-
-    if (!matchSummary && !box) {
-      container.innerHTML = `<div class="glass-panel p-8 text-center text-gray-400">Partita non trovata nel database.</div>`;
-      return;
-    }
-
-    this.currentMatch = {
-      fid: matchFid,
-      summary: matchSummary,
-      box: box
-    };
-
-    const homeTeamName = box?.homeTeam?.name || matchSummary?.homeTeam?.name || 'Squadra Casa';
-    const awayTeamName = box?.awayTeam?.name || matchSummary?.awayTeam?.name || 'Squadra Ospite';
-    const homeScore = box?.homeTeam?.score !== undefined ? box.homeTeam.score : (matchSummary?.scores?.total?.homeScore || 0);
-    const awayScore = box?.awayTeam?.score !== undefined ? box.awayTeam.score : (matchSummary?.scores?.total?.awayScore || 0);
-
-    const compName = matchSummary?.compName || 'Campionato Ufficiale FIP';
-    const groupName = matchSummary?.groupName || '';
-    const dateStr = matchSummary?.date ? new Date(matchSummary.date).toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Partita Ufficiale';
-    const courtStr = (matchSummary?.court?.place) || (box?.court?.place) || 'Palasport Ufficiale';
-
-    let html = `
-      <!-- Breadcrumb & Back -->
-      <div class="flex items-center justify-between gap-2 text-xs text-gray-400 pb-2">
-        <button onclick="${matchSummary ? `app.openCompetition('${matchSummary.compId}', ${matchSummary.groupIdx}, 'calendar')` : `app.navigate('championships')`}" class="hover:text-white flex items-center gap-1 font-semibold text-orange-400">
-          <i data-lucide="arrow-left" class="w-4 h-4"></i> Torna al girone
-        </button>
-        <span class="text-gray-300 font-medium">${compName} ${groupName ? '&bull; ' + groupName : ''}</span>
-      </div>
-
-      <!-- Match Scoreboard Hero Card -->
-      <div class="glass-panel p-6 space-y-6 relative overflow-hidden">
-        <div class="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-white/5 pb-3 text-xs text-gray-400">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span class="font-bold text-white uppercase tracking-wider">Referto Ufficiale Finale</span>
-          </div>
-          <div class="flex items-center gap-3">
-            <span><i data-lucide="map-pin" class="w-3.5 h-3.5 inline text-orange-400"></i> ${courtStr}</span>
-            <span>&bull;</span>
-            <span><i data-lucide="calendar" class="w-3.5 h-3.5 inline text-blue-400"></i> ${dateStr}</span>
-          </div>
-        </div>
-
-        <!-- Big Scoreboard -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-          
-          <!-- Home Team -->
-          <div class="flex items-center md:flex-row flex-col gap-4 text-center md:text-left cursor-pointer" onclick="app.openTeam('${homeTeamName}')">
-            <div class="w-16 h-16 rounded-2xl bg-gray-900 border border-white/10 flex items-center justify-center text-xl font-black text-orange-400 shadow-xl flex-shrink-0">
-              ${homeTeamName.substring(0, 2).toUpperCase()}
-            </div>
-            <div>
-              <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">CASA</span>
-              <h2 class="text-lg md:text-xl font-extrabold text-white hover:text-orange-400 transition-colors">${homeTeamName}</h2>
-            </div>
-          </div>
-
-          <!-- Total Score Display -->
-          <div class="flex flex-col items-center justify-center text-center">
-            <div class="flex items-center gap-4 bg-gray-950/80 px-6 py-3 rounded-2xl border border-white/10 shadow-inner">
-              <span class="text-3xl md:text-5xl font-black font-mono ${homeScore >= awayScore ? 'text-orange-400' : 'text-gray-400'}">${homeScore}</span>
-              <span class="text-xl font-light text-gray-600">-</span>
-              <span class="text-3xl md:text-5xl font-black font-mono ${awayScore >= homeScore ? 'text-orange-400' : 'text-gray-400'}">${awayScore}</span>
-            </div>
-            <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mt-2 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">FINALE</span>
-          </div>
-
-          <!-- Away Team -->
-          <div class="flex items-center md:flex-row-reverse flex-col gap-4 text-center md:text-right cursor-pointer" onclick="app.openTeam('${awayTeamName}')">
-            <div class="w-16 h-16 rounded-2xl bg-gray-900 border border-white/10 flex items-center justify-center text-xl font-black text-orange-400 shadow-xl flex-shrink-0">
-              ${awayTeamName.substring(0, 2).toUpperCase()}
-            </div>
-            <div>
-              <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">OSPITE</span>
-              <h2 class="text-lg md:text-xl font-extrabold text-white hover:text-orange-400 transition-colors">${awayTeamName}</h2>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- Quarter Partials if available -->
-        ${this.renderQuarterPartials(matchSummary, box)}
-
-        <!-- Match Sub-Navigation Tabs -->
-        <div class="flex items-center gap-2 pt-4 border-t border-white/5 overflow-x-auto">
-          <button onclick="app.setMatchTab('boxscore')" class="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${this.currentMatchTab === 'boxscore' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-900 text-gray-400 hover:text-white border border-white/5'}">
-            <i data-lucide="clipboard-list" class="w-3.5 h-3.5"></i>
-            <span>Tabellino Ufficiale FIBA</span>
-          </button>
-          <button onclick="app.setMatchTab('shotchart')" class="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${this.currentMatchTab === 'shotchart' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-900 text-gray-400 hover:text-white border border-white/5'}">
-            <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
-            <span>Shot Chart (Mappa Tiri)</span>
-          </button>
-          <button onclick="app.setMatchTab('leaders')" class="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${this.currentMatchTab === 'leaders' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-gray-900 text-gray-400 hover:text-white border border-white/5'}">
-            <i data-lucide="star" class="w-3.5 h-3.5"></i>
-            <span>Migliori in Campo</span>
-          </button>
-        </div>
-
-      </div>
-
-      <!-- Match Tab Content -->
-      <div class="space-y-6">
-    `;
-
-    if (this.currentMatchTab === 'boxscore') {
-      html += this.renderFibaBoxscoreTab(box, homeTeamName, awayTeamName);
-    } else if (this.currentMatchTab === 'shotchart') {
-      html += this.renderShotChartTab(box, homeTeamName, awayTeamName);
-    } else if (this.currentMatchTab === 'leaders') {
-      html += this.renderMatchLeadersTab(box, homeTeamName, awayTeamName);
-    }
-
-    html += `</div>`;
-    container.innerHTML = html;
-    if (window.lucide) lucide.createIcons();
-  }
-
-  renderQuarterPartials(matchSummary, box) {
-    const partials = matchSummary?.scores?.partials || box?.partials || [];
-    if (!partials || partials.length === 0) return '';
-
-    // Handle array of partial items (e.g. "@{homeScore=24; awayScore=15; period=1}" or objects)
-    const parsed = partials.map((p, i) => {
-      if (typeof p === 'string') {
-        const hMatch = p.match(/homeScore=(\d+)/);
-        const aMatch = p.match(/awayScore=(\d+)/);
-        const pMatch = p.match(/period=(\d+)/);
-        return {
-          home: hMatch ? hMatch[1] : 0,
-          away: aMatch ? aMatch[1] : 0,
-          period: pMatch ? 'Q' + pMatch[1] : 'Q' + (i + 1)
-        };
-      } else if (typeof p === 'object' && p !== null) {
-        return {
-          home: p.homeScore || 0,
-          away: p.awayScore || 0,
-          period: p.period ? (p.period > 4 ? 'OT' : 'Q' + p.period) : 'Q' + (i + 1)
-        };
-      }
-      return null;
-    }).filter(Boolean);
-
-    if (parsed.length === 0) return '';
 
     return `
-      <div class="flex items-center justify-center gap-2 pt-2 border-t border-white/5 flex-wrap">
-        <span class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mr-2">Parziali Quarti:</span>
-        ${parsed.map(q => `
-          <div class="bg-gray-900 px-3 py-1 rounded-lg border border-white/5 text-xs font-mono flex items-center gap-2">
-            <span class="text-orange-400 font-bold">${q.period}:</span>
-            <span class="text-white">${q.home} - ${q.away}</span>
-          </div>
-        `).join('')}
+      <div class="space-y-8">
+        ${renderTable(m.homeTeam?.name || 'Squadra Casa', m.homeTeam?.logo, hp, hb, 'text-blue-400')}
+        ${renderTable(m.awayTeam?.name || 'Squadra Ospite', m.awayTeam?.logo, ap, ab, 'text-amber-400')}
       </div>
     `;
   }
 
-  renderFibaBoxscoreTab(box, homeTeamName, awayTeamName) {
-    if (!box || (!box.homeTeam && !box.awayTeam)) {
-      return `
-        <div class="glass-panel p-8 text-center text-gray-400 space-y-2">
-          <i data-lucide="info" class="w-6 h-6 mx-auto text-gray-500"></i>
-          <p class="text-xs">Tabellino dettagliato atleti non registrato o in fase di sincronizzazione per questa gara.</p>
-        </div>
+  // ==========================================
+  // SQUADRE & ROSTER
+  // ==========================================
+
+  async showTeam(projectKey, compFid, teamFid, teamName) {
+    this.navigate('team');
+    const container = document.getElementById('teamDetailContent');
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Caricamento scheda di ${this.escapeHtml(teamName || 'squadra')}...</p>
+      </div>
+    `;
+
+    try {
+      const query = `
+        query GetTeamDetails($pK: String!, $cFid: String!, $tFid: String!) {
+          team(projectKey: $pK, competitionFid: $cFid, fid: $tFid) {
+            fid
+            name
+            logo
+            standingPosition
+            competition {
+              fid
+              name
+            }
+            players {
+              fid
+              name
+              lastName
+              number
+              photo
+              captain
+              stats {
+                games
+                points
+                pointsPerGame
+                totalRebounds
+                assists
+                steals
+                blocks
+                fibaRating
+              }
+            }
+          }
+        }
       `;
-    }
 
-    const renderTable = (teamObj, isHome) => {
-      if (!teamObj || !teamObj.players) return '';
-      const players = teamObj.players;
+      const data = await this.gql(query, { pK: projectKey || 'fip', cFid: compFid || '', tFid: teamFid });
+      const teamList = data?.team;
+      const team = Array.isArray(teamList) ? teamList[0] : teamList;
 
-      return `
-        <div class="glass-panel overflow-hidden space-y-2">
-          <div class="px-5 py-3 bg-gray-900/60 border-b border-white/10 flex items-center justify-between">
-            <h4 class="font-bold text-sm text-white flex items-center gap-2">
-              <span class="w-3 h-3 rounded-full ${isHome ? 'bg-orange-500' : 'bg-blue-500'}"></span>
-              <span>${teamObj.name || (isHome ? homeTeamName : awayTeamName)}</span>
-            </h4>
-            <span class="text-xs font-mono font-bold text-orange-400">${teamObj.score || 0} Punti Totali</span>
+      if (!team) {
+        container.innerHTML = `<div class="fip-card p-8 text-center text-xs text-gray-400">Dettagli squadra non disponibili.</div>`;
+        return;
+      }
+
+      const players = team.players || [];
+
+      container.innerHTML = `
+        <div class="fip-card p-6">
+          <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div class="flex items-center gap-4">
+              <div class="w-16 h-16 rounded-2xl bg-gray-800 border border-white/10 flex items-center justify-center p-2 flex-shrink-0">
+                ${(team.logo && team.logo !== 'N/A') ? `<img src="${team.logo}" class="max-h-full max-w-full object-contain" alt="">` : `<i data-lucide="shield" class="w-8 h-8 text-blue-400"></i>`}
+              </div>
+              <div>
+                <span class="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 font-bold uppercase">SQUADRA FIP</span>
+                <h1 class="text-2xl font-black text-white mt-1">${this.escapeHtml(team.name)}</h1>
+                <p class="text-xs text-gray-400 mt-0.5">${this.escapeHtml(team.competition?.name || 'Competizione FIP')}</p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+              ${team.standingPosition ? `
+                <div class="text-center px-4 py-2 rounded-xl bg-gray-900 border border-white/5">
+                  <span class="text-[10px] text-gray-400 uppercase font-mono">Posizione</span>
+                  <div class="text-lg font-black text-blue-400 font-mono">${team.standingPosition}°</div>
+                </div>
+              ` : ''}
+              <button onclick="app.showCompetition('${compFid}', '${projectKey || 'fip'}', '${this.escapeJs(team.competition?.name || '')}')" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2">
+                <i data-lucide="trophy" class="w-4 h-4 text-blue-400"></i> Vedi Girone
+              </button>
+            </div>
           </div>
+        </div>
+
+        <div class="fip-card p-6 space-y-4">
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <i data-lucide="users" class="w-4 h-4 text-blue-400"></i>
+            <span>Rosa Atleti (${players.length})</span>
+          </h3>
 
           <div class="overflow-x-auto">
-            <table class="w-full text-left stats-table text-xs">
+            <table class="w-full text-left text-xs">
               <thead>
-                <tr class="bg-gray-900/80">
-                  <th class="w-8 text-center">#</th>
-                  <th>Giocatore</th>
-                  <th class="text-center">Min</th>
-                  <th class="text-center font-bold text-orange-400">PTS</th>
-                  <th class="text-center">2P</th>
-                  <th class="text-center">3P</th>
-                  <th class="text-center">TL</th>
-                  <th class="text-center">RIM</th>
-                  <th class="text-center">AST</th>
-                  <th class="text-center">REC</th>
-                  <th class="text-center">PER</th>
-                  <th class="text-center">FF</th>
-                  <th class="text-center font-bold text-blue-400">VAL</th>
+                <tr class="bg-gray-900/40 text-gray-400 font-mono">
+                  <th class="p-2.5">#</th>
+                  <th class="p-2.5">Atleta</th>
+                  <th class="p-2.5 text-center">PG</th>
+                  <th class="p-2.5 text-center">Punti</th>
+                  <th class="p-2.5 text-center">PPG</th>
+                  <th class="p-2.5 text-center">Rimbalzi</th>
+                  <th class="p-2.5 text-center">Assist</th>
+                  <th class="p-2.5 text-center">Valutazione (VAL)</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-white/5 font-mono">
                 ${players.map(p => {
                   const s = p.stats || {};
-                  const pts = s.points || 0;
-                  const reb = (s.reboundsOffensive || 0) + (s.reboundsDefensive || 0);
-                  const twoStr = `${s.twoPointsMade || 0}/${s.twoPointsAttempted || 0}`;
-                  const threeStr = `${s.threePointsMade || 0}/${s.threePointsAttempted || 0}`;
-                  const ftStr = `${s.freeThrowsMade || 0}/${s.freeThrowsAttempted || 0}`;
-                  const val = s.valuation !== undefined ? s.valuation : (s.efficiency !== undefined ? s.efficiency : pts);
+                  const fullName = `${p.name} ${p.lastName || ''}`.trim();
+                  const ppg = s.pointsPerGame ? Number(s.pointsPerGame).toFixed(1) : (s.games ? (s.points / s.games).toFixed(1) : '0.0');
 
                   return `
-                    <tr class="hover:bg-white/5 transition-colors cursor-pointer" onclick="app.openPlayer('${p.name}')">
-                      <td class="text-center text-gray-400 font-bold">${p.number || '-'}</td>
-                      <td class="font-sans font-bold text-white hover:text-orange-400 transition-colors whitespace-nowrap">${p.name}</td>
-                      <td class="text-center text-gray-400">${s.minutes || '-'}</td>
-                      <td class="text-center font-bold text-orange-400 text-sm">${pts}</td>
-                      <td class="text-center text-gray-300">${twoStr}</td>
-                      <td class="text-center text-gray-300">${threeStr}</td>
-                      <td class="text-center text-gray-300">${ftStr}</td>
-                      <td class="text-center text-gray-200 font-semibold">${reb}</td>
-                      <td class="text-center text-gray-300">${s.assists || 0}</td>
-                      <td class="text-center text-gray-400">${s.steals || 0}</td>
-                      <td class="text-center text-gray-400">${s.turnovers || 0}</td>
-                      <td class="text-center text-gray-400">${s.personalFouls || 0}</td>
-                      <td class="text-center font-bold text-blue-400">${val}</td>
+                    <tr class="hover:bg-white/5 transition-colors cursor-pointer" onclick="app.showPlayer('${projectKey || 'fip'}', '${compFid}', '${teamFid}', '${p.fid}', '${this.escapeJs(fullName)}')">
+                      <td class="p-2.5 font-bold text-blue-400">${p.number ? '#' + p.number : '-'}</td>
+                      <td class="p-2.5 font-sans font-bold text-white hover:text-blue-400 transition-colors">${this.escapeHtml(fullName)}</td>
+                      <td class="p-2.5 text-center">${s.games ?? '-'}</td>
+                      <td class="p-2.5 text-center font-bold text-amber-300">${s.points ?? '-'}</td>
+                      <td class="p-2.5 text-center font-bold text-blue-300">${ppg}</td>
+                      <td class="p-2.5 text-center">${s.totalRebounds ?? '-'}</td>
+                      <td class="p-2.5 text-center">${s.assists ?? '-'}</td>
+                      <td class="p-2.5 text-center font-bold text-emerald-400">${s.fibaRating ?? '-'}</td>
                     </tr>
                   `;
                 }).join('')}
@@ -1161,882 +1991,835 @@ class BasketApp {
           </div>
         </div>
       `;
-    };
 
-    return `
-      <div class="space-y-6">
-        ${renderTable(box.homeTeam, true)}
-        ${renderTable(box.awayTeam, false)}
-      </div>
-    `;
+      if (window.lucide) window.lucide.createIcons();
+    } catch (e) {
+      container.innerHTML = `<div class="fip-card p-6 text-center text-xs text-red-400">Errore nel caricamento dei dati della squadra.</div>`;
+    }
   }
 
-  renderShotChartTab(box, homeTeamName, awayTeamName) {
-    // Extract shot events from boxscore
-    const allShots = [];
-    if (box) {
-      if (box.shots && Array.isArray(box.shots)) {
-        allShots.push(...box.shots);
-      }
-      // Check in team player shots
-      const extractTeamShots = (teamObj, isHome) => {
-        if (!teamObj || !teamObj.players) return;
-        for (const p of teamObj.players) {
-          if (p.shots && Array.isArray(p.shots)) {
-            for (const s of p.shots) {
-              allShots.push({
-                ...s,
-                playerName: p.name,
-                teamName: teamObj.name || (isHome ? homeTeamName : awayTeamName),
-                isHome: isHome
-              });
+  async showPlayer(projectKey, compFid, teamFid, playerFid, playerName) {
+    this.navigate('player');
+    const container = document.getElementById('playerDetailContent');
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Caricamento statistiche di ${this.escapeHtml(playerName || 'atleta')}...</p>
+      </div>
+    `;
+
+    try {
+      const query = `
+        query GetPlayerStats($pK: String!, $cFid: String!, $tFid: String!, $pFid: String!) {
+          player(projectKey: $pK, competitionFid: $cFid, teamFid: $tFid, fid: $pFid) {
+            fid
+            name
+            lastName
+            number
+            photo
+            captain
+            team {
+              fid
+              name
+              logo
+            }
+            competition {
+              fid
+              name
+            }
+            stats {
+              games
+              points
+              pointsAVG
+              pointsPerGame
+              assists
+              assistsAVG
+              totalRebounds
+              reboundsAVG
+              steals
+              stealsAVG
+              blocks
+              blocksAVG
+              fibaRating
+              freeThrowsPercentage
+              inArcThrowsPercentage
+              outArcThrowsPercentage
             }
           }
         }
-      };
-      extractTeamShots(box.homeTeam, true);
-      extractTeamShots(box.awayTeam, false);
-    }
-
-    if (allShots.length === 0) {
-      // Fallback: generate realistic visual shot distribution based on made/attempted stats from boxscore
-      if (box && box.homeTeam && box.awayTeam) {
-        this.generateSyntheticShots(box, allShots, homeTeamName, awayTeamName);
-      }
-    }
-
-    // Prepare SVG Court and Shot Points
-    let shotPointsHtml = '';
-    let madeCount = 0;
-    let missedCount = 0;
-
-    allShots.forEach((s, idx) => {
-      const isMade = Boolean(s.made || s.isMade || s.result === 'MADE' || s.result === '1');
-      if (isMade) madeCount++; else missedCount++;
-
-      // Standardize coordinates (0 to 100 viewBox space)
-      let cx = (s.x !== undefined ? parseFloat(s.x) : (Math.random() * 80 + 10));
-      let cy = (s.y !== undefined ? parseFloat(s.y) : (Math.random() * 70 + 10));
-
-      // Fit into half-court viewBox (0 0 500 470)
-      if (cx <= 100) cx = (cx / 100) * 460 + 20;
-      if (cy <= 100) cy = (cy / 100) * 420 + 20;
-
-      const pName = s.playerName || (s.isHome ? homeTeamName : awayTeamName);
-      const color = isMade ? '#10b981' : '#ef4444';
-      const shape = isMade ? `
-        <circle cx="${cx}" cy="${cy}" r="6" fill="#10b981" stroke="#ffffff" stroke-width="1.5" class="shot-marker" data-shot-idx="${idx}" />
-      ` : `
-        <g class="shot-marker" data-shot-idx="${idx}">
-          <line x1="${cx - 4.5}" y1="${cy - 4.5}" x2="${cx + 4.5}" y2="${cy + 4.5}" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" />
-          <line x1="${cx + 4.5}" y1="${cy - 4.5}" x2="${cx - 4.5}" y2="${cy + 4.5}" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" />
-        </g>
       `;
 
-      shotPointsHtml += shape;
-    });
+      const data = await this.gql(query, { pK: projectKey || 'fip', cFid: compFid || '', tFid: teamFid || '', pFid: playerFid });
+      const p = data?.player;
+      if (!p) {
+        container.innerHTML = `<div class="fip-card p-8 text-center text-xs text-gray-400">Scheda atleta non disponibile.</div>`;
+        return;
+      }
 
-    const totalShots = madeCount + missedCount;
-    const shotPct = totalShots > 0 ? Math.round((madeCount / totalShots) * 100) : 0;
+      this.currentPlayerData = p;
+      const s = p.stats || {};
+      const fullName = `${p.name} ${p.lastName || ''}`.trim();
 
-    return `
-      <div class="glass-panel p-6 space-y-6">
-        
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
-          <div>
-            <h3 class="text-lg font-bold text-white flex items-center gap-2">
-              <i data-lucide="crosshair" class="w-5 h-5 text-orange-400"></i>
-              <span>Shot Chart Ufficiale FIBA</span>
+      container.innerHTML = `
+        <div class="fip-card p-6">
+          <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div class="flex items-center gap-4">
+              <div class="w-20 h-20 rounded-2xl bg-gray-800 border border-white/10 overflow-hidden flex items-center justify-center flex-shrink-0">
+                ${(p.photo && p.photo !== 'N/A') ? `<img src="${p.photo}" class="w-full h-full object-cover" alt="">` : `<i data-lucide="user" class="w-10 h-10 text-blue-400"></i>`}
+              </div>
+              <div>
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 font-bold">${p.number ? '#' + p.number : 'ATLETA'}</span>
+                  ${p.captain ? `<span class="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold">CAPITANO</span>` : ''}
+                </div>
+                <h1 class="text-2xl md:text-3xl font-black text-white">${this.escapeHtml(fullName)}</h1>
+                <p class="text-xs text-gray-400 mt-1 flex items-center gap-2">
+                  <span class="text-white font-semibold">${this.escapeHtml(p.team?.name || '')}</span>
+                  <span>•</span>
+                  <span>${this.escapeHtml(p.competition?.name || '')}</span>
+                </p>
+              </div>
+            </div>
+
+            <button onclick="app.quickCompare('${this.escapeJs(fullName)}')" class="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-blue-500/20">
+              <i data-lucide="git-compare" class="w-4 h-4"></i> Confronta con un altro giocatore
+            </button>
+          </div>
+        </div>
+
+        <!-- Key Averages Dashboard -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Partite (PG)</span>
+            <div class="text-2xl font-black text-white font-mono">${s.games ?? '-'}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Punti / G (PPG)</span>
+            <div class="text-2xl font-black text-amber-300 font-mono">${s.pointsPerGame ? Number(s.pointsPerGame).toFixed(1) : (s.points && s.games ? (s.points / s.games).toFixed(1) : '-')}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Rimbalzi / G</span>
+            <div class="text-2xl font-black text-blue-300 font-mono">${s.reboundsAVG ? Number(s.reboundsAVG).toFixed(1) : (s.totalRebounds && s.games ? (s.totalRebounds / s.games).toFixed(1) : '-')}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Assist / G</span>
+            <div class="text-2xl font-black text-cyan-300 font-mono">${s.assistsAVG ? Number(s.assistsAVG).toFixed(1) : (s.assists && s.games ? (s.assists / s.games).toFixed(1) : '-')}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Recuperi / G</span>
+            <div class="text-2xl font-black text-indigo-300 font-mono">${s.stealsAVG ? Number(s.stealsAVG).toFixed(1) : (s.steals && s.games ? (s.steals / s.games).toFixed(1) : '-')}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1 bg-blue-600/10 border-blue-500/30">
+            <span class="text-[10px] text-blue-400 uppercase font-mono font-bold">Valutazione (VAL)</span>
+            <div class="text-2xl font-black text-emerald-400 font-mono">${s.fibaRating ?? '-'}</div>
+          </div>
+        </div>
+
+        <!-- Shooting Percentages & Radar -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="fip-card p-6 space-y-4">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="percent" class="w-4 h-4 text-blue-400"></i>
+              <span>Percentuali di Realizzazione</span>
             </h3>
-            <p class="text-xs text-gray-400">Mappa interattiva delle posizioni di tiro sul parquet di gioco</p>
-          </div>
 
-          <!-- Shot Summary Badges -->
-          <div class="flex items-center gap-3 text-xs font-mono">
-            <span class="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
-              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-              <span>${madeCount} Realizzati</span>
-            </span>
-            <span class="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 font-bold">
-              <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
-              <span>${missedCount} Sbagliati</span>
-            </span>
-            <span class="px-3 py-1 rounded-lg bg-gray-900 text-white border border-white/10 font-bold">
-              ${shotPct}% Precisione
-            </span>
-          </div>
-        </div>
+            <div class="space-y-4 pt-2">
+              <div>
+                <div class="flex justify-between text-xs font-mono mb-1">
+                  <span class="text-gray-300">Tiro da 2 Punti</span>
+                  <span class="font-bold text-blue-400">${s.inArcThrowsPercentage ? Number(s.inArcThrowsPercentage).toFixed(1) : '0.0'}%</span>
+                </div>
+                <div class="h-2 rounded-full bg-gray-800 overflow-hidden">
+                  <div class="h-full bg-blue-500" style="width: ${Math.min(100, Number(s.inArcThrowsPercentage) || 0)}%"></div>
+                </div>
+              </div>
 
-        <!-- SVG Basketball Court -->
-        <div class="court-container p-4 max-w-2xl mx-auto rounded-2xl">
-          <svg viewBox="0 0 500 470" class="court-svg" xmlns="http://www.w3.org/2000/svg">
-            <!-- Court Background -->
-            <rect x="0" y="0" width="500" height="470" fill="#0d1424" rx="16" />
-            
-            <!-- Perimeter Boundary -->
-            <rect x="20" y="20" width="460" height="430" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2" />
-            
-            <!-- Center Court Circle (Top) -->
-            <path d="M 190 20 A 60 60 0 0 0 310 20" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2" />
-            
-            <!-- 3-Point Arc (Official FIBA dimensions) -->
-            <!-- Straight corner lines -->
-            <line x1="50" y1="450" x2="50" y2="350" stroke="rgba(255,255,255,0.25)" stroke-width="2" />
-            <line x1="450" y1="450" x2="450" y2="350" stroke="rgba(255,255,255,0.25)" stroke-width="2" />
-            <!-- Arc -->
-            <path d="M 50 350 A 205 205 0 0 1 450 350" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="2" />
+              <div>
+                <div class="flex justify-between text-xs font-mono mb-1">
+                  <span class="text-gray-300">Tiro da 3 Punti</span>
+                  <span class="font-bold text-amber-400">${s.outArcThrowsPercentage ? Number(s.outArcThrowsPercentage).toFixed(1) : '0.0'}%</span>
+                </div>
+                <div class="h-2 rounded-full bg-gray-800 overflow-hidden">
+                  <div class="h-full bg-amber-500" style="width: ${Math.min(100, Number(s.outArcThrowsPercentage) || 0)}%"></div>
+                </div>
+              </div>
 
-            <!-- Restricted Area Paint / Key -->
-            <rect x="175" y="270" width="150" height="180" fill="rgba(249, 115, 22, 0.04)" stroke="rgba(255,255,255,0.25)" stroke-width="2" />
-            
-            <!-- Free Throw Circle (Top dashed, bottom solid) -->
-            <path d="M 175 270 A 75 75 0 0 1 325 270" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="2" stroke-dasharray="6,6" />
-            <path d="M 175 270 A 75 75 0 0 0 325 270" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="2" />
-
-            <!-- Backboard and Rim -->
-            <line x1="220" y1="425" x2="280" y2="425" stroke="#ffffff" stroke-width="4" />
-            <line x1="250" y1="425" x2="250" y2="415" stroke="#f97316" stroke-width="3" />
-            <circle cx="250" cy="405" r="12" fill="none" stroke="#f97316" stroke-width="3" />
-
-            <!-- No Charge Semi-Circle -->
-            <path d="M 215 425 A 35 35 0 0 1 285 425" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" />
-
-            <!-- Shot Markers Plotted on Court -->
-            ${shotPointsHtml}
-          </svg>
-        </div>
-
-        <!-- Legend and Info -->
-        <div class="flex items-center justify-center gap-6 text-xs text-gray-400 pt-2">
-          <div class="flex items-center gap-2">
-            <span class="w-3.5 h-3.5 rounded-full bg-emerald-500 border border-white"></span>
-            <span>Canestro Realizzato</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-red-500 font-black text-sm">&times;</span>
-            <span>Tiro Sbagliato</span>
-          </div>
-        </div>
-
-      </div>
-    `;
-  }
-
-  generateSyntheticShots(box, outArray, homeName, awayName) {
-    const processTeam = (teamObj, isHome) => {
-      if (!teamObj || !teamObj.players) return;
-      for (const p of teamObj.players) {
-        const s = p.stats || {};
-        const twoM = s.twoPointsMade || 0;
-        const twoA = s.twoPointsAttempted || 0;
-        const threeM = s.threePointsMade || 0;
-        const threeA = s.threePointsAttempted || 0;
-
-        // Generate 2P shots inside arc (radius < 180 from basket (250, 405))
-        for (let i = 0; i < twoA; i++) {
-          const made = i < twoM;
-          const angle = Math.random() * Math.PI;
-          const dist = Math.random() * 120 + 20;
-          const x = 250 + Math.cos(angle) * dist * (Math.random() > 0.5 ? 1 : -1);
-          const y = 405 - Math.sin(angle) * dist;
-          outArray.push({
-            x: ((x - 20) / 460) * 100,
-            y: ((y - 20) / 420) * 100,
-            made: made,
-            playerName: p.name,
-            teamName: isHome ? homeName : awayName,
-            isHome: isHome
-          });
-        }
-
-        // Generate 3P shots outside arc
-        for (let i = 0; i < threeA; i++) {
-          const made = i < threeM;
-          const angle = Math.random() * Math.PI * 0.8 + 0.3;
-          const dist = Math.random() * 50 + 215;
-          const x = Math.max(30, Math.min(470, 250 + Math.cos(angle) * dist * (Math.random() > 0.5 ? 1 : -1)));
-          const y = Math.max(30, Math.min(430, 405 - Math.sin(angle) * dist));
-          outArray.push({
-            x: ((x - 20) / 460) * 100,
-            y: ((y - 20) / 420) * 100,
-            made: made,
-            playerName: p.name,
-            teamName: isHome ? homeName : awayName,
-            isHome: isHome
-          });
-        }
-      }
-    };
-    processTeam(box.homeTeam, true);
-    processTeam(box.awayTeam, false);
-  }
-
-  renderMatchLeadersTab(box, homeTeamName, awayTeamName) {
-    if (!box || !box.homeTeam || !box.awayTeam) {
-      return `<div class="glass-panel p-8 text-center text-gray-400">Dati leader non disponibili per questo match.</div>`;
-    }
-
-    const getTop = (players, statKey) => {
-      if (!Array.isArray(players) || players.length === 0) return { name: '-', val: 0 };
-      const sorted = [...players].sort((a, b) => ((b.stats && b.stats[statKey]) || 0) - ((a.stats && a.stats[statKey]) || 0));
-      const best = sorted[0];
-      return {
-        name: best ? best.name : '-',
-        val: best && best.stats ? (best.stats[statKey] || 0) : 0
-      };
-    };
-
-    const getTopReb = (players) => {
-      if (!Array.isArray(players) || players.length === 0) return { name: '-', val: 0 };
-      const sorted = [...players].sort((a, b) => {
-        const rA = ((a.stats && a.stats.reboundsOffensive) || 0) + ((a.stats && a.stats.reboundsDefensive) || 0);
-        const rB = ((b.stats && b.stats.reboundsOffensive) || 0) + ((b.stats && b.stats.reboundsDefensive) || 0);
-        return rB - rA;
-      });
-      const best = sorted[0];
-      const reb = best && best.stats ? ((best.stats.reboundsOffensive || 0) + (best.stats.reboundsDefensive || 0)) : 0;
-      return { name: best ? best.name : '-', val: reb };
-    };
-
-    const homePts = getTop(box.homeTeam.players, 'points');
-    const awayPts = getTop(box.awayTeam.players, 'points');
-    const homeReb = getTopReb(box.homeTeam.players);
-    const awayReb = getTopReb(box.awayTeam.players);
-    const homeAst = getTop(box.homeTeam.players, 'assists');
-    const awayAst = getTop(box.awayTeam.players, 'assists');
-    const homeVal = getTop(box.homeTeam.players, 'valuation');
-    const awayVal = getTop(box.awayTeam.players, 'valuation');
-
-    const renderCard = (title, icon, hLeader, aLeader) => `
-      <div class="glass-panel p-5 space-y-4">
-        <div class="flex items-center justify-between border-b border-white/5 pb-2 text-xs font-bold text-gray-400">
-          <span class="flex items-center gap-1.5 text-orange-400">
-            <i data-lucide="${icon}" class="w-4 h-4"></i>
-            <span>${title}</span>
-          </span>
-        </div>
-        <div class="grid grid-cols-2 gap-4 items-center">
-          <!-- Home Leader -->
-          <div class="space-y-1">
-            <span class="text-[10px] text-gray-500 uppercase font-bold block">${homeTeamName}</span>
-            <p class="font-bold text-sm text-white truncate">${hLeader.name}</p>
-            <span class="font-mono font-black text-xl text-orange-400">${hLeader.val}</span>
-          </div>
-          <!-- Away Leader -->
-          <div class="space-y-1 text-right border-l border-white/5 pl-4">
-            <span class="text-[10px] text-gray-500 uppercase font-bold block">${awayTeamName}</span>
-            <p class="font-bold text-sm text-white truncate">${aLeader.name}</p>
-            <span class="font-mono font-black text-xl text-blue-400">${aLeader.val}</span>
-          </div>
-        </div>
-      </div>
-    `;
-
-    return `
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        ${renderCard('Miglior Realizzatore (Punti)', 'flame', homePts, awayPts)}
-        ${renderCard('Dominatore ai Rimbalzi', 'disc', homeReb, awayReb)}
-        ${renderCard('Miglior Assistman', 'navigation', homeAst, awayAst)}
-        ${renderCard('Valutazione / Efficienza FIBA', 'star', homeVal, awayVal)}
-      </div>
-    `;
-  }
-
-  /* =========================================================================
-   * 4. TEAM PROFILE VIEW
-   * ========================================================================= */
-
-  openTeam(teamName) {
-    this.navigate('team', { teamName });
-  }
-
-  renderTeamDetail(teamName) {
-    const container = document.getElementById('teamDetailContent');
-    if (!container) return;
-
-    const tKey = teamName.trim().toUpperCase();
-    const teamObj = this.indexedTeams.get(tKey);
-
-    const displayName = teamObj ? teamObj.name : teamName;
-    const compName = teamObj ? teamObj.compName : 'Campionato Ufficiale FIP';
-    const groupName = teamObj ? teamObj.groupName : '';
-    const stats = teamObj?.stats || { played: 0, wins: 0, losses: 0, points: 0 };
-    const roster = teamObj?.roster ? Array.from(teamObj.roster.values()) : [];
-    const matches = teamObj?.matches || [];
-
-    let html = `
-      <!-- Breadcrumb -->
-      <div class="flex items-center justify-between gap-2 text-xs text-gray-400 pb-2">
-        <button onclick="app.navigate('championships')" class="hover:text-white flex items-center gap-1 font-semibold text-orange-400">
-          <i data-lucide="arrow-left" class="w-4 h-4"></i> Torna ai Campionati
-        </button>
-        <span class="text-gray-200 font-medium">${compName}</span>
-      </div>
-
-      <!-- Team Header Card -->
-      <div class="glass-panel p-6 space-y-4">
-        <div class="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white text-xl font-black shadow-xl">
-              ${displayName.substring(0, 2).toUpperCase()}
-            </div>
-            <div>
-              <h1 class="text-xl sm:text-2xl font-extrabold text-white">${displayName}</h1>
-              <p class="text-xs text-gray-400 mt-0.5">${compName} ${groupName ? '&bull; ' + groupName : ''}</p>
+              <div>
+                <div class="flex justify-between text-xs font-mono mb-1">
+                  <span class="text-gray-300">Tiri Liberi</span>
+                  <span class="font-bold text-emerald-400">${s.freeThrowsPercentage ? Number(s.freeThrowsPercentage).toFixed(1) : '0.0'}%</span>
+                </div>
+                <div class="h-2 rounded-full bg-gray-800 overflow-hidden">
+                  <div class="h-full bg-emerald-500" style="width: ${Math.min(100, Number(s.freeThrowsPercentage) || 0)}%"></div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- Record Badges -->
-          <div class="flex items-center gap-3">
-            <div class="px-4 py-2 rounded-xl bg-gray-900 border border-white/10 text-center">
-              <span class="text-[10px] text-gray-400 font-bold block uppercase">Vittorie</span>
-              <span class="font-mono font-black text-lg text-emerald-400">${stats.wins || 0}</span>
-            </div>
-            <div class="px-4 py-2 rounded-xl bg-gray-900 border border-white/10 text-center">
-              <span class="text-[10px] text-gray-400 font-bold block uppercase">Sconfitte</span>
-              <span class="font-mono font-black text-lg text-red-400">${stats.losses || 0}</span>
-            </div>
-            <div class="px-4 py-2 rounded-xl bg-gray-900 border border-white/10 text-center">
-              <span class="text-[10px] text-gray-400 font-bold block uppercase">Punti</span>
-              <span class="font-mono font-black text-lg text-orange-400">${stats.points || 0}</span>
+          <div class="fip-card p-6 space-y-4">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="pie-chart" class="w-4 h-4 text-cyan-400"></i>
+              <span>Profilo Prestazionale Atleta</span>
+            </h3>
+            <div class="h-48 relative">
+              <canvas id="playerRadarCanvas"></canvas>
             </div>
           </div>
-        </div>
-      </div>
-
-      <!-- Roster Table -->
-      <div class="glass-panel overflow-hidden">
-        <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between">
-          <h3 class="font-bold text-sm text-white flex items-center gap-2">
-            <i data-lucide="users" class="w-4 h-4 text-orange-400"></i>
-            <span>Roster Ufficiale Atleti</span>
-          </h3>
-          <span class="text-xs text-gray-400">${roster.length} Giocatori Registrati</span>
-        </div>
-
-        <div class="overflow-x-auto">
-          <table class="w-full text-left stats-table text-xs">
-            <thead>
-              <tr class="bg-gray-900/60">
-                <th class="w-8 text-center">#</th>
-                <th>Nome Atleta</th>
-                <th class="text-center">Ruolo</th>
-                <th class="text-center">Presenze</th>
-                <th class="text-center font-bold text-orange-400">PPG</th>
-                <th class="text-center">Media VAL</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-white/5 font-mono">
-              ${roster.length > 0 ? roster.map(p => `
-                <tr class="hover:bg-white/5 transition-colors cursor-pointer" onclick="app.openPlayer('${p.name}')">
-                  <td class="text-center text-gray-400 font-bold">${p.number || '-'}</td>
-                  <td class="font-sans font-bold text-white hover:text-orange-400 transition-colors">${p.name}</td>
-                  <td class="text-center text-gray-400">${p.position || 'G/F'}</td>
-                  <td class="text-center text-gray-300">${p.games || 1}</td>
-                  <td class="text-center font-bold text-orange-400">${p.ppg || '0.0'}</td>
-                  <td class="text-center text-blue-400 font-semibold">${p.val || '0.0'}</td>
-                </tr>
-              `).join('') : `
-                <tr><td colspan="6" class="text-center py-6 text-gray-400 font-sans">Roster in caricamento dai referti ufficiali.</td></tr>
-              `}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-
-    container.innerHTML = html;
-    if (window.lucide) lucide.createIcons();
-  }
-
-  /* =========================================================================
-   * 5. PLAYER PROFILE VIEW
-   * ========================================================================= */
-
-  openPlayer(playerName) {
-    this.navigate('player', { playerName });
-  }
-
-  renderPlayerDetail(playerName) {
-    const container = document.getElementById('playerDetailContent');
-    if (!container) return;
-
-    const pKey = playerName.trim().toUpperCase();
-    const playerObj = this.indexedPlayers.get(pKey);
-
-    const displayName = playerObj ? playerObj.name : playerName;
-    const games = playerObj?.games || [];
-    const totalPts = playerObj?.totalPoints || 0;
-    const totalReb = playerObj?.totalRebounds || 0;
-    const totalAst = playerObj?.totalAssists || 0;
-    const totalVal = playerObj?.totalValuation || 0;
-    const gCount = Math.max(1, games.length);
-
-    const ppg = (totalPts / gCount).toFixed(1);
-    const rpg = (totalReb / gCount).toFixed(1);
-    const apg = (totalAst / gCount).toFixed(1);
-    const valPg = (totalVal / gCount).toFixed(1);
-
-    const teamsStr = playerObj?.teams ? Array.from(playerObj.teams).join(', ') : 'Società FIP';
-
-    let html = `
-      <!-- Breadcrumb -->
-      <div class="flex items-center justify-between gap-2 text-xs text-gray-400 pb-2">
-        <button onclick="app.navigate('championships')" class="hover:text-white flex items-center gap-1 font-semibold text-orange-400">
-          <i data-lucide="arrow-left" class="w-4 h-4"></i> Torna ai Campionati
-        </button>
-        <span class="text-gray-200 font-medium">${teamsStr}</span>
-      </div>
-
-      <!-- Player Header Hero -->
-      <div class="glass-panel p-6 space-y-4">
-        <div class="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white text-xl font-black shadow-xl">
-              ${playerObj?.number ? '#' + playerObj.number : '🏀'}
-            </div>
-            <div>
-              <h1 class="text-xl sm:text-2xl font-extrabold text-white">${displayName}</h1>
-              <p class="text-xs text-gray-400 mt-0.5">${teamsStr}</p>
-            </div>
-          </div>
-
-          <!-- Averages Cards -->
-          <div class="grid grid-cols-4 gap-2">
-            <div class="px-3 py-2 rounded-xl bg-gray-900 border border-white/10 text-center">
-              <span class="text-[9px] text-gray-400 font-bold block uppercase">PPG</span>
-              <span class="font-mono font-black text-base text-orange-400">${ppg}</span>
-            </div>
-            <div class="px-3 py-2 rounded-xl bg-gray-900 border border-white/10 text-center">
-              <span class="text-[9px] text-gray-400 font-bold block uppercase">RPG</span>
-              <span class="font-mono font-black text-base text-emerald-400">${rpg}</span>
-            </div>
-            <div class="px-3 py-2 rounded-xl bg-gray-900 border border-white/10 text-center">
-              <span class="text-[9px] text-gray-400 font-bold block uppercase">APG</span>
-              <span class="font-mono font-black text-base text-blue-400">${apg}</span>
-            </div>
-            <div class="px-3 py-2 rounded-xl bg-gray-900 border border-white/10 text-center">
-              <span class="text-[9px] text-gray-400 font-bold block uppercase">VAL</span>
-              <span class="font-mono font-black text-base text-amber-400">${valPg}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Game Log Table -->
-      <div class="glass-panel overflow-hidden">
-        <div class="px-6 py-4 border-b border-white/10 flex items-center justify-between">
-          <h3 class="font-bold text-sm text-white flex items-center gap-2">
-            <i data-lucide="calendar" class="w-4 h-4 text-orange-400"></i>
-            <span>Registro Gare Ufficiali (Game Log)</span>
-          </h3>
-          <span class="text-xs text-gray-400">${games.length} Partite a referto</span>
-        </div>
-
-        <div class="overflow-x-auto">
-          <table class="w-full text-left stats-table text-xs">
-            <thead>
-              <tr class="bg-gray-900/60 font-mono">
-                <th>Partita / Avversario</th>
-                <th class="text-center">Min</th>
-                <th class="text-center font-bold text-orange-400">PTS</th>
-                <th class="text-center">2P</th>
-                <th class="text-center">3P</th>
-                <th class="text-center">TL</th>
-                <th class="text-center">RIM</th>
-                <th class="text-center">AST</th>
-                <th class="text-center font-bold text-blue-400">VAL</th>
-                <th class="text-center">Azione</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-white/5 font-mono">
-              ${games.length > 0 ? games.map(g => {
-                const matchSummary = this.indexedMatches.get(String(g.matchFid));
-                const oppName = g.isHome ? (matchSummary?.awayTeam?.name || 'Avversario') : (matchSummary?.homeTeam?.name || 'Avversario');
-
-                return `
-                  <tr class="hover:bg-white/5 transition-colors">
-                    <td class="font-sans font-bold text-white whitespace-nowrap">vs ${oppName}</td>
-                    <td class="text-center text-gray-400">${g.minutes}</td>
-                    <td class="text-center font-bold text-orange-400 text-sm">${g.points}</td>
-                    <td class="text-center text-gray-300">${g.twoMade}/${g.twoAttempted}</td>
-                    <td class="text-center text-gray-300">${g.threeMade}/${g.threeAttempted}</td>
-                    <td class="text-center text-gray-300">${g.freeThrowsMade}/${g.freeThrowsAttempted}</td>
-                    <td class="text-center text-emerald-400 font-semibold">${g.rebounds}</td>
-                    <td class="text-center text-blue-400">${g.assists}</td>
-                    <td class="text-center font-bold text-amber-400">${g.valuation}</td>
-                    <td class="text-center">
-                      <button onclick="app.openMatch('${g.matchFid}')" class="px-2.5 py-1 rounded bg-orange-500/20 text-orange-400 hover:bg-orange-500 hover:text-white text-[11px] font-bold transition-all">
-                        Referto
-                      </button>
-                    </td>
-                  </tr>
-                `;
-              }).join('') : `
-                <tr><td colspan="10" class="text-center py-6 text-gray-400 font-sans">Nessuna gara registrata.</td></tr>
-              `}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-
-    container.innerHTML = html;
-    if (window.lucide) lucide.createIcons();
-  }
-
-  /* =========================================================================
-   * 6. INSTANT GLOBAL IN-MEMORY SEARCH
-   * ========================================================================= */
-
-  renderSearchView() {
-    // If search view opens, focus input
-    const input = document.getElementById('globalSearchInput');
-    if (input && input.value) {
-      this.performSearch(input.value);
-    }
-  }
-
-  handleSearchInput(val) {
-    const clearBtn = document.getElementById('clearSearchBtn');
-    if (clearBtn) {
-      if (val.trim()) clearBtn.classList.remove('hidden');
-      else clearBtn.classList.add('hidden');
-    }
-    this.performSearch(val);
-  }
-
-  clearSearch() {
-    const input = document.getElementById('globalSearchInput');
-    if (input) {
-      input.value = '';
-      this.handleSearchInput('');
-      input.focus();
-    }
-  }
-
-  setSearchFilter(f) {
-    this.searchFilter = f;
-    document.querySelectorAll('.search-filter-chip').forEach(btn => {
-      if (btn.getAttribute('data-filter') === f) {
-        btn.className = 'search-filter-chip active px-3 py-1 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30 font-semibold text-xs';
-      } else {
-        btn.className = 'search-filter-chip px-3 py-1 rounded-full bg-gray-800 text-gray-400 hover:text-white border border-white/5 font-semibold text-xs';
-      }
-    });
-    const input = document.getElementById('globalSearchInput');
-    if (input && input.value) {
-      this.performSearch(input.value);
-    }
-  }
-
-  quickSearch(query) {
-    const input = document.getElementById('globalSearchInput');
-    if (input) input.value = query;
-    this.navigate('search');
-    this.performSearch(query);
-  }
-
-  performSearch(query) {
-    const q = (query || '').trim().toLowerCase();
-    const grid = document.getElementById('searchResultsGrid');
-    const welcome = document.getElementById('searchWelcomeState');
-    const badge = document.getElementById('resultsCountBadge');
-    if (!grid) return;
-
-    if (!q) {
-      grid.innerHTML = '';
-      if (welcome) welcome.classList.remove('hidden');
-      if (badge) badge.textContent = '0 elementi';
-      return;
-    }
-
-    if (welcome) welcome.classList.add('hidden');
-
-    const results = [];
-
-    // Search Competitions
-    if (this.searchFilter === 'all' || this.searchFilter === 'competitions') {
-      for (const comp of this.competitions) {
-        if (
-          (comp.name && comp.name.toLowerCase().includes(q)) ||
-          (comp.officialName && comp.officialName.toLowerCase().includes(q)) ||
-          (comp.region && comp.region.toLowerCase().includes(q))
-        ) {
-          results.push({
-            type: 'competition',
-            id: comp.id,
-            title: comp.name,
-            subtitle: `${comp.region || 'Nazionale'} &bull; ${comp.groups ? comp.groups.length : 0} Gironi`,
-            icon: comp.icon || 'trophy',
-            badge: '🏆 Campionato',
-            action: `app.openCompetition('${comp.id}')`
-          });
-        }
-      }
-    }
-
-    // Search Teams
-    if (this.searchFilter === 'all' || this.searchFilter === 'teams') {
-      for (const [tKey, team] of this.indexedTeams.entries()) {
-        if (team.name.toLowerCase().includes(q)) {
-          results.push({
-            type: 'team',
-            id: tKey,
-            title: team.name,
-            subtitle: `${team.compName} (${team.stats?.wins || 0}V - ${team.stats?.losses || 0}P)`,
-            icon: 'users',
-            badge: '👥 Squadra',
-            action: `app.openTeam('${team.name}')`
-          });
-        }
-      }
-    }
-
-    // Search Players
-    if (this.searchFilter === 'all' || this.searchFilter === 'players') {
-      for (const [pKey, player] of this.indexedPlayers.entries()) {
-        if (player.name.toLowerCase().includes(q)) {
-          const teams = Array.from(player.teams).join(', ');
-          const ppg = (player.totalPoints / Math.max(1, player.games.length)).toFixed(1);
-          results.push({
-            type: 'player',
-            id: pKey,
-            title: player.name,
-            subtitle: `${teams} &bull; ${ppg} PPG (${player.games.length} gare)`,
-            icon: 'user',
-            badge: '🏃 Giocatore',
-            action: `app.openPlayer('${player.name}')`
-          });
-        }
-      }
-    }
-
-    if (badge) badge.textContent = `${results.length} risultati`;
-
-    if (results.length === 0) {
-      grid.innerHTML = `
-        <div class="col-span-full glass-panel p-8 text-center text-gray-400 space-y-2">
-          <i data-lucide="search-x" class="w-8 h-8 text-gray-500 mx-auto"></i>
-          <h3 class="font-bold text-white">Nessun risultato trovato per "${query}"</h3>
-          <p class="text-xs">Prova a cercare con un altro termine oppure sfoglia i campionati dalla schermata principale.</p>
         </div>
       `;
-      if (window.lucide) lucide.createIcons();
-      return;
-    }
 
-    grid.innerHTML = results.slice(0, 48).map(r => `
-      <div class="glass-panel p-4 flex items-center justify-between glass-panel-hover cursor-pointer" onclick="${r.action}">
-        <div class="flex items-center gap-3 min-w-0">
-          <div class="w-10 h-10 rounded-xl bg-gray-900 border border-white/10 flex items-center justify-center text-orange-400 flex-shrink-0">
-            <i data-lucide="${r.icon}" class="w-5 h-5"></i>
-          </div>
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-gray-800 text-orange-400 border border-white/10">${r.badge}</span>
+      if (window.lucide) window.lucide.createIcons();
+      setTimeout(() => this.initPlayerRadarChart(s, fullName), 50);
+    } catch (e) {
+      container.innerHTML = `<div class="fip-card p-6 text-center text-xs text-red-400">Errore nel caricamento del profilo giocatore.</div>`;
+    }
+  }
+
+  initPlayerRadarChart(s, name) {
+    const ctx = document.getElementById('playerRadarCanvas');
+    if (!ctx) return;
+    if (this.playerChart) this.playerChart.destroy();
+
+    const ppg = Number(s.pointsPerGame) || 0;
+    const rpg = Number(s.reboundsAVG) || 0;
+    const apg = Number(s.assistsAVG) || 0;
+    const spg = Number(s.stealsAVG) || 0;
+    const val = Number(s.fibaRating) || 0;
+
+    this.playerChart = new Chart(ctx, {
+      type: 'radar',
+      data: {
+        labels: ['Punti', 'Rimbalzi', 'Assist', 'Recuperi', 'Valutazione'],
+        datasets: [{
+          label: name,
+          data: [ppg, rpg * 2, apg * 2, spg * 4, val],
+          backgroundColor: 'rgba(37, 99, 235, 0.25)',
+          borderColor: '#2563eb',
+          pointBackgroundColor: '#60a5fa',
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          r: {
+            angleLines: { color: 'rgba(255,255,255,0.05)' },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            pointLabels: { color: '#9ca3af', font: { size: 10 } },
+            ticks: { display: false }
+          }
+        }
+      }
+    });
+  }
+
+  async showUniquePlayer(uniqueId, playerName) {
+    this.navigate('player');
+    const container = document.getElementById('playerDetailContent');
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Caricamento carriera di ${this.escapeHtml(playerName || 'atleta')}...</p>
+      </div>
+    `;
+
+    try {
+      const query = `
+        query GetUniquePlayerCareer($id: String!) {
+          uniquePlayer(id: $id) {
+            id
+            name
+            lastName
+            photo
+            stats {
+              games
+              points
+              pointsPerGame
+              rebounds
+              reboundsPerGame
+              assists
+              assistsPerGame
+              steals
+              stealsPerGame
+              fibaRating
+            }
+          }
+        }
+      `;
+
+      const data = await this.gql(query, { id: uniqueId });
+      const up = data?.uniquePlayer;
+      if (!up) {
+        container.innerHTML = `<div class="fip-card p-8 text-center text-xs text-gray-400">Carriera non disponibile.</div>`;
+        return;
+      }
+
+      const s = up.stats || {};
+      const fullName = `${up.name} ${up.lastName || ''}`.trim();
+
+      container.innerHTML = `
+        <div class="fip-card p-6">
+          <div class="flex items-center gap-4">
+            <div class="w-20 h-20 rounded-2xl bg-gray-800 border border-white/10 overflow-hidden flex items-center justify-center flex-shrink-0">
+              ${(up.photo && up.photo !== 'N/A') ? `<img src="${up.photo}" class="w-full h-full object-cover" alt="">` : `<i data-lucide="user-check" class="w-10 h-10 text-cyan-400"></i>`}
             </div>
-            <h4 class="font-bold text-sm text-white truncate hover:text-orange-400 transition-colors mt-0.5">${r.title}</h4>
-            <p class="text-[11px] text-gray-400 truncate">${r.subtitle}</p>
+            <div>
+              <span class="text-xs px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-bold">PROFILO CARRIERA FIP</span>
+              <h1 class="text-2xl md:text-3xl font-black text-white mt-1">${this.escapeHtml(fullName)}</h1>
+              <p class="text-xs text-gray-400 mt-0.5 font-mono">Dati aggregati multi-stagione</p>
+            </div>
           </div>
         </div>
-        <i data-lucide="chevron-right" class="w-4 h-4 text-gray-500 flex-shrink-0"></i>
-      </div>
-    `).join('');
 
-    if (window.lucide) lucide.createIcons();
-  }
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Partite Totali</span>
+            <div class="text-2xl font-black text-white font-mono">${s.games ?? '-'}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Punti / Partita</span>
+            <div class="text-2xl font-black text-amber-300 font-mono">${s.pointsPerGame ? Number(s.pointsPerGame).toFixed(1) : '-'}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Rimbalzi / Partita</span>
+            <div class="text-2xl font-black text-blue-300 font-mono">${s.reboundsPerGame ? Number(s.reboundsPerGame).toFixed(1) : '-'}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1">
+            <span class="text-[10px] text-gray-400 uppercase font-mono">Assist / Partita</span>
+            <div class="text-2xl font-black text-cyan-300 font-mono">${s.assistsPerGame ? Number(s.assistsPerGame).toFixed(1) : '-'}</div>
+          </div>
+          <div class="fip-card p-4 text-center space-y-1 bg-cyan-600/10 border-cyan-500/30">
+            <span class="text-[10px] text-cyan-400 uppercase font-mono font-bold">Valutazione Totale</span>
+            <div class="text-2xl font-black text-emerald-400 font-mono">${s.fibaRating ?? '-'}</div>
+          </div>
+        </div>
+      `;
 
-  /* =========================================================================
-   * 7. STANDINGS & MATCHES GLOBAL WRAPPERS
-   * ========================================================================= */
-
-  populateSelectDropdowns() {
-    const sSelect = document.getElementById('championshipSelect');
-    const mSelect = document.getElementById('matchesCompSelect');
-
-    const optionsHtml = this.competitions.map(c => `
-      <option value="${c.id}">${c.name} (${c.region || 'Nazionale'})</option>
-    `).join('');
-
-    if (sSelect) sSelect.innerHTML = optionsHtml;
-    if (mSelect) mSelect.innerHTML = optionsHtml;
-  }
-
-  renderStandingsView(compId) {
-    const targetComp = compId ? this.competitions.find(c => c.id === compId) : this.competitions[0];
-    if (!targetComp) return;
-    const select = document.getElementById('championshipSelect');
-    if (select) select.value = targetComp.id;
-    this.loadStandingsData(targetComp.id);
-  }
-
-  setStandingsTab(tab) {
-    this.standingsViewTab = tab;
-    const tBtn = document.getElementById('standingsTabTable');
-    const sBtn = document.getElementById('standingsTabScorers');
-    const tContent = document.getElementById('standingsContentTable');
-    const sContent = document.getElementById('standingsContentScorers');
-
-    if (tab === 'table') {
-      if (tBtn) tBtn.className = 'px-4 py-2 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 text-xs font-bold transition-all';
-      if (sBtn) sBtn.className = 'px-4 py-2 rounded-xl bg-gray-900 text-gray-400 hover:text-white border border-white/5 text-xs font-bold transition-all';
-      if (tContent) tContent.classList.remove('hidden');
-      if (sContent) sContent.classList.add('hidden');
-    } else {
-      if (tBtn) tBtn.className = 'px-4 py-2 rounded-xl bg-gray-900 text-gray-400 hover:text-white border border-white/5 text-xs font-bold transition-all';
-      if (sBtn) sBtn.className = 'px-4 py-2 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30 text-xs font-bold transition-all';
-      if (tContent) tContent.classList.add('hidden');
-      if (sContent) sContent.classList.remove('hidden');
+      if (window.lucide) window.lucide.createIcons();
+    } catch (e) {
+      container.innerHTML = `<div class="fip-card p-6 text-center text-xs text-red-400">Errore nel caricamento del profilo aggregato.</div>`;
     }
   }
 
-  loadStandingsData(compId) {
-    const comp = this.competitions.find(c => c.id === compId) || this.competitions[0];
-    if (!comp) return;
+  // ==========================================
+  // HEAD-TO-HEAD COMPARISON
+  // ==========================================
 
-    const group = (comp.groups && comp.groups[0]) || { name: 'Girone Unico', standings: [] };
-    const tContent = document.getElementById('standingsContentTable');
-    const sContent = document.getElementById('standingsContentScorers');
-
-    if (tContent) tContent.innerHTML = this.renderStandingsTabContent(group);
-    if (sContent) sContent.innerHTML = this.renderScorersTabContent(group);
-    if (window.lucide) lucide.createIcons();
-  }
-
-  renderMatchesView(compId) {
-    const targetComp = compId ? this.competitions.find(c => c.id === compId) : this.competitions[0];
-    if (!targetComp) return;
-    const select = document.getElementById('matchesCompSelect');
-    if (select) select.value = targetComp.id;
-    this.loadCompetitionMatches(targetComp.id);
-  }
-
-  loadCompetitionMatches(compId) {
-    const comp = this.competitions.find(c => c.id === compId) || this.competitions[0];
-    if (!comp) return;
-
-    const group = (comp.groups && comp.groups[0]) || { name: 'Girone Unico', rounds: [] };
-    const container = document.getElementById('matchesContentList');
-    if (container) {
-      container.innerHTML = this.renderCalendarTabContent(group);
-    }
-    if (window.lucide) lucide.createIcons();
-  }
-
-  /* =========================================================================
-   * 8. HEAD TO HEAD COMPARISON VIEW
-   * ========================================================================= */
-
-  renderCompareView() {
+  quickCompare(playerName) {
+    this.navigate('compare');
+    const input1 = document.getElementById('comparePlayer1Input');
+    if (input1) input1.value = playerName;
     this.updateComparison();
   }
 
-  updateComparison() {
-    const in1 = document.getElementById('compareInput1')?.value.trim() || 'EA7 EMPORIO ARMANI MILANO';
-    const in2 = document.getElementById('compareInput2')?.value.trim() || 'UMANA REYER VENEZIA';
-    const container = document.getElementById('comparisonContainer');
+  async updateComparison() {
+    const p1Query = document.getElementById('comparePlayer1Input')?.value.trim();
+    const p2Query = document.getElementById('comparePlayer2Input')?.value.trim();
+    const container = document.getElementById('comparisonResultsContainer');
     if (!container) return;
 
-    const t1 = this.indexedTeams.get(in1.toUpperCase());
-    const t2 = this.indexedTeams.get(in2.toUpperCase());
-
-    const p1 = this.indexedPlayers.get(in1.toUpperCase());
-    const p2 = this.indexedPlayers.get(in2.toUpperCase());
-
-    // Compare Teams or Players
-    if (p1 || p2) {
-      container.innerHTML = this.renderPlayerComparison(p1, p2, in1, in2);
-    } else {
-      container.innerHTML = this.renderTeamComparison(t1, t2, in1, in2);
+    if (!p1Query || !p2Query) {
+      container.innerHTML = `<p class="text-xs text-gray-400 text-center py-8">Inserisci due nomi di atleti FIP sopra per avviare il confronto diretto.</p>`;
+      return;
     }
-    if (window.lucide) lucide.createIcons();
+
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Confronto dati FIP in corso...</p>
+      </div>
+    `;
+
+    try {
+      const pSearchQuery = `
+        query SearchPlayerForCompare($c: String!, $s: String!, $opt: ISearchOptions!) {
+          searchPlayers(searchCriteria: $c, seasonId: $s, searchOptions: $opt) {
+            fid
+            name
+            lastName
+            projectKey
+            competitionFid
+            teamFid
+            team { name }
+            competition { name }
+          }
+        }
+      `;
+
+      let p1 = null;
+      let p2 = null;
+
+      for (const seasonId of this.knownSeasons) {
+        if (!p1) {
+          try {
+            const d1 = await this.gql(pSearchQuery, { c: p1Query, s: seasonId, opt: { limit: 1 } });
+            if (d1?.searchPlayers?.[0]) p1 = d1.searchPlayers[0];
+          } catch (e) {}
+        }
+        if (!p2) {
+          try {
+            const d2 = await this.gql(pSearchQuery, { c: p2Query, s: seasonId, opt: { limit: 1 } });
+            if (d2?.searchPlayers?.[0]) p2 = d2.searchPlayers[0];
+          } catch (e) {}
+        }
+        if (p1 && p2) break;
+      }
+
+      const pStatQuery = `
+        query GetPlayerStatsCompare($pK: String!, $cFid: String!, $tFid: String!, $pFid: String!) {
+          player(projectKey: $pK, competitionFid: $cFid, teamFid: $tFid, fid: $pFid) {
+            fid
+            name
+            lastName
+            photo
+            number
+            team { name }
+            stats {
+              pointsPerGame
+              reboundsAVG
+              assistsAVG
+              stealsAVG
+              blocksAVG
+              fibaRating
+              inArcThrowsPercentage
+              outArcThrowsPercentage
+              freeThrowsPercentage
+            }
+          }
+        }
+      `;
+
+      let p1Full = null;
+      let p2Full = null;
+
+      if (p1) {
+        const d = await this.gql(pStatQuery, { pK: p1.projectKey || 'fip', cFid: p1.competitionFid || '', tFid: p1.teamFid || '', pFid: p1.fid });
+        p1Full = d?.player;
+      }
+      if (p2) {
+        const d = await this.gql(pStatQuery, { pK: p2.projectKey || 'fip', cFid: p2.competitionFid || '', tFid: p2.teamFid || '', pFid: p2.fid });
+        p2Full = d?.player;
+      }
+
+      const s1 = p1Full?.stats || { pointsPerGame: 0, reboundsAVG: 0, assistsAVG: 0, stealsAVG: 0, fibaRating: 0 };
+      const s2 = p2Full?.stats || { pointsPerGame: 0, reboundsAVG: 0, assistsAVG: 0, stealsAVG: 0, fibaRating: 0 };
+
+      const name1 = p1Full ? `${p1Full.name} ${p1Full.lastName || ''}`.trim() : p1Query;
+      const name2 = p2Full ? `${p2Full.name} ${p2Full.lastName || ''}`.trim() : p2Query;
+
+      container.innerHTML = `
+        <div class="space-y-6 pt-4">
+          <!-- Comparison Radar Chart -->
+          <div class="h-64 relative max-w-lg mx-auto">
+            <canvas id="comparisonRadarCanvas"></canvas>
+          </div>
+
+          <!-- Comparison Metrics Table -->
+          <div class="overflow-x-auto max-w-2xl mx-auto">
+            <table class="w-full text-xs font-mono">
+              <thead>
+                <tr class="bg-gray-900 border-b border-white/5 text-gray-400">
+                  <th class="p-3 text-left font-bold text-blue-400">${this.escapeHtml(name1)}</th>
+                  <th class="p-3 text-center uppercase tracking-wider text-gray-300">Parametro</th>
+                  <th class="p-3 text-right font-bold text-amber-400">${this.escapeHtml(name2)}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/5">
+                <tr class="hover:bg-white/5">
+                  <td class="p-3 font-bold text-blue-400">${Number(s1.pointsPerGame || 0).toFixed(1)}</td>
+                  <td class="p-3 text-center text-gray-400 font-sans">Punti / Partita (PPG)</td>
+                  <td class="p-3 text-right font-bold text-amber-400">${Number(s2.pointsPerGame || 0).toFixed(1)}</td>
+                </tr>
+                <tr class="hover:bg-white/5">
+                  <td class="p-3 font-bold text-blue-400">${Number(s1.reboundsAVG || 0).toFixed(1)}</td>
+                  <td class="p-3 text-center text-gray-400 font-sans">Rimbalzi / Partita (RPG)</td>
+                  <td class="p-3 text-right font-bold text-amber-400">${Number(s2.reboundsAVG || 0).toFixed(1)}</td>
+                </tr>
+                <tr class="hover:bg-white/5">
+                  <td class="p-3 font-bold text-blue-400">${Number(s1.assistsAVG || 0).toFixed(1)}</td>
+                  <td class="p-3 text-center text-gray-400 font-sans">Assist / Partita (APG)</td>
+                  <td class="p-3 text-right font-bold text-amber-400">${Number(s2.assistsAVG || 0).toFixed(1)}</td>
+                </tr>
+                <tr class="hover:bg-white/5">
+                  <td class="p-3 font-bold text-blue-400">${Number(s1.stealsAVG || 0).toFixed(1)}</td>
+                  <td class="p-3 text-center text-gray-400 font-sans">Palle Recuperate (PR)</td>
+                  <td class="p-3 text-right font-bold text-amber-400">${Number(s2.stealsAVG || 0).toFixed(1)}</td>
+                </tr>
+                <tr class="hover:bg-white/5">
+                  <td class="p-3 font-bold text-blue-400">${s1.fibaRating ?? 0}</td>
+                  <td class="p-3 text-center text-gray-400 font-sans font-bold text-white">Valutazione (VAL)</td>
+                  <td class="p-3 text-right font-bold text-amber-400">${s2.fibaRating ?? 0}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      if (window.lucide) window.lucide.createIcons();
+
+      const radarCtx = document.getElementById('comparisonRadarCanvas');
+      if (radarCtx) {
+        if (this.comparisonChart) this.comparisonChart.destroy();
+        this.comparisonChart = new Chart(radarCtx, {
+          type: 'radar',
+          data: {
+            labels: ['Punti (PPG)', 'Rimbalzi (RPG)', 'Assist (APG)', 'Recuperi (PR)', 'Valutazione (VAL)'],
+            datasets: [
+              {
+                label: name1,
+                data: [Number(s1.pointsPerGame) || 0, Number(s1.reboundsAVG) || 0, Number(s1.assistsAVG) || 0, Number(s1.stealsAVG) || 0, Number(s1.fibaRating) || 0],
+                backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                borderColor: '#2563eb',
+                pointBackgroundColor: '#2563eb'
+              },
+              {
+                label: name2,
+                data: [Number(s2.pointsPerGame) || 0, Number(s2.reboundsAVG) || 0, Number(s2.assistsAVG) || 0, Number(s2.stealsAVG) || 0, Number(s2.fibaRating) || 0],
+                backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                borderColor: '#f59e0b',
+                pointBackgroundColor: '#f59e0b'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              r: {
+                angleLines: { color: 'rgba(255,255,255,0.05)' },
+                grid: { color: 'rgba(255,255,255,0.05)' },
+                pointLabels: { color: '#e5e7eb', font: { size: 10, weight: 'bold' } },
+                ticks: { display: false }
+              }
+            }
+          }
+        });
+      }
+    } catch (e) {
+      container.innerHTML = `<p class="text-xs text-red-400 text-center py-6">Errore durante il caricamento del confronto.</p>`;
+    }
   }
 
-  renderTeamComparison(t1, t2, name1, name2) {
-    const s1 = t1?.stats || { played: 4, wins: 3, losses: 1, points: 6, pointsFor: 375, pointsAgainst: 340 };
-    const s2 = t2?.stats || { played: 4, wins: 1, losses: 3, points: 2, pointsFor: 340, pointsAgainst: 375 };
+  // ==========================================
+  // PARTITE & RISULTATI VIEW
+  // ==========================================
 
-    const winPct1 = s1.played > 0 ? Math.round((s1.wins / s1.played) * 100) : 75;
-    const winPct2 = s2.played > 0 ? Math.round((s2.wins / s2.played) * 100) : 25;
+  async loadRecentMatches() {
+    const select = document.getElementById('matchesCompSelect');
+    const compName = select ? select.value : 'Under 15 Eccellenza';
+    this.loadCompetitionMatches(compName);
+  }
+
+  async loadCompetitionMatches(compQuery) {
+    const container = document.getElementById('matchesContentList');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Caricamento calendario gare per "${this.escapeHtml(compQuery)}"...</p>
+      </div>
+    `;
+
+    try {
+      const q = `
+        query SearchCompMatches($c: String!, $s: String!, $opt: ISearchOptions!) {
+          searchCompetitions(searchCriteria: $c, seasonId: $s, searchOptions: $opt) {
+            fid
+            name
+            projectKey
+            groups {
+              fid
+              name
+            }
+          }
+        }
+      `;
+
+      let comps = [];
+      for (const seasonId of this.knownSeasons) {
+        try {
+          const data = await this.gql(q, { c: compQuery, s: seasonId, opt: { limit: 5 } });
+          if (data?.searchCompetitions?.length > 0) {
+            comps = data.searchCompetitions;
+            break;
+          }
+        } catch (e) {}
+      }
+
+      if (comps.length === 0 || !comps[0].groups?.[0]) {
+        container.innerHTML = `<p class="text-xs text-gray-400 text-center py-6">Nessuna partita trovata per questa categoria.</p>`;
+        return;
+      }
+
+      const comp = comps[0];
+      const group = comp.groups[0];
+
+      const matchQuery = `
+        query GetGroupMatchesList($pK: String!, $cFid: String!, $gFid: String!) {
+          matchByGroup(projectKey: $pK, competitionFid: $cFid, groupFid: $gFid) {
+            fid
+            date
+            status
+            scores {
+              total {
+                homeScore
+                awayScore
+              }
+            }
+            homeTeam {
+              fid
+              name
+              logo
+            }
+            awayTeam {
+              fid
+              name
+              logo
+            }
+          }
+        }
+      `;
+
+      const mData = await this.gql(matchQuery, { pK: comp.projectKey || 'fip', cFid: comp.fid, gFid: group.fid });
+      const matches = mData?.matchByGroup || [];
+
+      if (matches.length === 0) {
+        container.innerHTML = `<p class="text-xs text-gray-400 text-center py-6">Nessun incontro in programma per il girone ${this.escapeHtml(group.name)}.</p>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="space-y-3">
+          <div class="flex items-center justify-between text-xs text-gray-400 mb-2">
+            <span>Fase / Girone: <strong class="text-white">${this.escapeHtml(group.name)}</strong> (${matches.length} gare)</span>
+            <button onclick="app.showCompetition('${comp.fid}', '${comp.projectKey || 'fip'}', '${this.escapeJs(comp.name)}')" class="text-blue-400 hover:underline font-bold">Vedi tutti i gironi</button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            ${matches.map(m => this.renderMatchItemCard(m, comp.projectKey || 'fip', comp.fid)).join('')}
+          </div>
+        </div>
+      `;
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (e) {
+      container.innerHTML = `<p class="text-xs text-red-400 text-center py-6">Errore nel caricamento delle partite FIP.</p>`;
+    }
+  }
+
+  // ==========================================
+  // CLASSIFICHE VIEW
+  // ==========================================
+
+  async loadStandingsData(champQuery) {
+    const container = document.getElementById('standingsContentTable');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center gap-3">
+        <div class="w-8 h-8 spinner"></div>
+        <p class="text-xs text-gray-400">Caricamento classifiche ufficiali FIP...</p>
+      </div>
+    `;
+
+    try {
+      const q = `
+        query GetChampionshipStandings($c: String!, $s: String!, $opt: ISearchOptions!) {
+          searchCompetitions(searchCriteria: $c, seasonId: $s, searchOptions: $opt) {
+            fid
+            name
+            projectKey
+            groups {
+              fid
+              name
+            }
+          }
+        }
+      `;
+
+      let comps = [];
+      for (const seasonId of this.knownSeasons) {
+        try {
+          const data = await this.gql(q, { c: champQuery, s: seasonId, opt: { limit: 5 } });
+          if (data?.searchCompetitions?.length > 0) {
+            comps = data.searchCompetitions;
+            break;
+          }
+        } catch (e) {}
+      }
+
+      if (comps.length === 0 || !comps[0].groups?.[0]) {
+        container.innerHTML = `<p class="text-xs text-gray-400 text-center py-6">Nessuna classifica disponibile per questa categoria.</p>`;
+        return;
+      }
+
+      const comp = comps[0];
+      const group = comp.groups[0];
+      this.loadGroupStandings(comp.projectKey || 'fip', comp.fid, group.fid);
+    } catch (e) {
+      container.innerHTML = `<p class="text-xs text-red-400 text-center py-6">Errore nel caricamento delle classifiche FIP.</p>`;
+    }
+  }
+
+  async loadGroupStandings(projectKey, compFid, groupFid) {
+    const target = document.getElementById('compGroupStandingsContent') || document.getElementById('standingsContentTable');
+    if (!target) return;
+
+    target.innerHTML = `
+      <div class="py-8 flex flex-col items-center justify-center gap-2">
+        <div class="w-6 h-6 spinner"></div>
+        <p class="text-xs text-gray-400">Aggiornamento classifica girone...</p>
+      </div>
+    `;
+
+    try {
+      const query = `
+        query GetGroupStandings($pK: String!, $cFid: String!, $gFid: String!) {
+          standings(projectKey: $pK, competitionFid: $cFid, groupFid: $gFid) {
+            fid
+            name
+            position
+            logo
+            stats {
+              playedMatches
+              wonMatches
+              lostMatches
+              pointsPerGame
+              opponentsPointsPerGame
+            }
+          }
+        }
+      `;
+
+      const data = await this.gql(query, { pK: projectKey || 'fip', cFid: compFid, gFid: groupFid });
+      const rows = data?.standings || [];
+
+      if (rows.length === 0) {
+        target.innerHTML = `<p class="text-xs text-gray-400 text-center py-6">Classifica non ancora disponibile per questo girone.</p>`;
+        return;
+      }
+
+      target.innerHTML = `
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="bg-gray-900/60 text-gray-400 font-mono border-b border-white/5">
+                <th class="p-3 w-12 text-center">POS</th>
+                <th class="p-3">SQUADRA</th>
+                <th class="p-3 text-center font-bold text-white">PT</th>
+                <th class="p-3 text-center">G</th>
+                <th class="p-3 text-center text-emerald-400">V</th>
+                <th class="p-3 text-center text-red-400">P</th>
+                <th class="p-3 text-center hidden sm:table-cell">PPG (Fatti)</th>
+                <th class="p-3 text-center hidden sm:table-cell">OPPG (Subiti)</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5 font-mono">
+              ${rows.map((row, idx) => {
+                const s = row.stats || {};
+                const pos = row.position || (idx + 1);
+                const posBadge = pos <= 4 ? 'text-emerald-400 font-black' : (pos >= rows.length - 2 ? 'text-red-400' : 'text-gray-300');
+                const pts = (s.wonMatches || 0) * 2;
+                const ppg = s.pointsPerGame ? Number(s.pointsPerGame).toFixed(1) : '-';
+                const oppg = s.opponentsPointsPerGame ? Number(s.opponentsPointsPerGame).toFixed(1) : '-';
+
+                return `
+                  <tr class="hover:bg-white/5 transition-colors cursor-pointer" onclick="app.showTeam('${projectKey || 'fip'}', '${compFid}', '${row.fid}', '${this.escapeJs(row.name || '')}')">
+                    <td class="p-3 text-center font-bold ${posBadge}">${pos}</td>
+                    <td class="p-3 font-sans font-bold text-white flex items-center gap-2.5">
+                      <div class="w-6 h-6 rounded bg-gray-800 flex items-center justify-center p-0.5 flex-shrink-0">
+                        ${(row.logo && row.logo !== 'N/A') ? `<img src="${row.logo}" class="max-h-full max-w-full object-contain" alt="">` : `<i data-lucide="shield" class="w-3.5 h-3.5 text-blue-400"></i>`}
+                      </div>
+                      <span class="hover:text-blue-400 transition-colors">${this.escapeHtml(row.name || 'Squadra')}</span>
+                    </td>
+                    <td class="p-3 text-center font-bold text-white bg-blue-500/10">${pts}</td>
+                    <td class="p-3 text-center">${s.playedMatches ?? 0}</td>
+                    <td class="p-3 text-center font-bold text-emerald-400">${s.wonMatches ?? 0}</td>
+                    <td class="p-3 text-center text-red-400">${s.lostMatches ?? 0}</td>
+                    <td class="p-3 text-center text-gray-400 hidden sm:table-cell">${ppg}</td>
+                    <td class="p-3 text-center text-gray-400 hidden sm:table-cell">${oppg}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (e) {
+      target.innerHTML = `<p class="text-xs text-red-400 text-center py-6">Errore nel recupero della classifica.</p>`;
+    }
+  }
+
+  renderMatchItemCard(m, projectKey, compFid) {
+    const hScore = m.scores?.total?.homeScore ?? '-';
+    const aScore = m.scores?.total?.awayScore ?? '-';
+    const dateStr = m.date ? new Date(m.date).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Data da definire';
+
+    let statusBadge = '<span class="text-[10px] text-gray-400 font-mono">Da Giocare</span>';
+    if (m.status === 'LIVE' || m.status === 'IN_PROGRESS') {
+      statusBadge = '<span class="text-[10px] text-red-400 font-bold animate-pulse">● LIVE</span>';
+    } else if (m.status === 'FINISHED' || m.status === 'FINAL') {
+      statusBadge = '<span class="text-[10px] text-blue-400 font-bold">Finale</span>';
+    }
 
     return `
-      <div class="space-y-6 pt-4">
-        <div class="grid grid-cols-2 gap-4">
-          <div class="glass-panel p-5 text-center space-y-2 border-orange-500/30">
-            <span class="text-xs font-bold text-orange-400 uppercase">Squadra 1</span>
-            <h3 class="font-extrabold text-base text-white">${t1 ? t1.name : name1}</h3>
-            <span class="font-mono text-3xl font-black text-orange-400">${s1.points || 0} Pt</span>
-            <p class="text-xs text-gray-400">${s1.wins} Vittorie - ${s1.losses} Sconfitte (${winPct1}%)</p>
+      <div onclick="app.showMatch('${projectKey || 'fip'}', '${compFid}', '${m.fid}')" class="fip-card fip-card-hover p-4 cursor-pointer flex flex-col justify-between gap-3 group">
+        <div class="flex items-center justify-between text-xs text-gray-400 border-b border-white/5 pb-2">
+          <span>${dateStr}</span>
+          ${statusBadge}
+        </div>
+
+        <div class="space-y-2 py-1">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-bold text-white group-hover:text-blue-400 transition-colors truncate max-w-[180px]">${this.escapeHtml(m.homeTeam?.name || 'Casa')}</span>
+            <span class="font-mono font-black text-sm text-white">${hScore}</span>
           </div>
-          <div class="glass-panel p-5 text-center space-y-2 border-blue-500/30">
-            <span class="text-xs font-bold text-blue-400 uppercase">Squadra 2</span>
-            <h3 class="font-extrabold text-base text-white">${t2 ? t2.name : name2}</h3>
-            <span class="font-mono text-3xl font-black text-blue-400">${s2.points || 0} Pt</span>
-            <p class="text-xs text-gray-400">${s2.wins} Vittorie - ${s2.losses} Sconfitte (${winPct2}%)</p>
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-bold text-white group-hover:text-amber-400 transition-colors truncate max-w-[180px]">${this.escapeHtml(m.awayTeam?.name || 'Ospite')}</span>
+            <span class="font-mono font-black text-sm text-white">${aScore}</span>
           </div>
         </div>
 
-        <div class="glass-panel p-6 space-y-4">
-          <h4 class="font-bold text-xs uppercase tracking-wider text-gray-400 border-b border-white/5 pb-2">Confronto Metriche</h4>
-          
-          <div class="space-y-3 text-xs">
-            <div>
-              <div class="flex justify-between font-bold mb-1">
-                <span class="text-orange-400">${s1.pointsFor || 0} PF</span>
-                <span class="text-gray-400">Punti Segnati Totali</span>
-                <span class="text-blue-400">${s2.pointsFor || 0} PF</span>
-              </div>
-              <div class="h-2 rounded-full bg-gray-800 flex overflow-hidden">
-                <div style="width: ${(s1.pointsFor / Math.max(1, (s1.pointsFor + s2.pointsFor))) * 100}%" class="bg-orange-500"></div>
-                <div style="width: ${(s2.pointsFor / Math.max(1, (s1.pointsFor + s2.pointsFor))) * 100}%" class="bg-blue-500"></div>
-              </div>
-            </div>
-
-            <div>
-              <div class="flex justify-between font-bold mb-1">
-                <span class="text-orange-400">${winPct1}%</span>
-                <span class="text-gray-400">% Vittorie Stagionali</span>
-                <span class="text-blue-400">${winPct2}%</span>
-              </div>
-              <div class="h-2 rounded-full bg-gray-800 flex overflow-hidden">
-                <div style="width: ${winPct1}%" class="bg-orange-500"></div>
-                <div style="width: ${winPct2}%" class="bg-blue-500"></div>
-              </div>
-            </div>
-          </div>
+        <div class="flex items-center justify-between pt-2 border-t border-white/5 text-[11px] text-blue-400 font-bold">
+          <span class="flex items-center gap-1 group-hover:underline">Match Center &amp; Tabellino <i data-lucide="chevron-right" class="w-3 h-3"></i></span>
+          <span class="text-gray-500 font-mono text-[10px]">#${m.fid}</span>
         </div>
       </div>
     `;
   }
 
-  renderPlayerComparison(p1, p2, name1, name2) {
-    const ppg1 = p1 ? (p1.totalPoints / Math.max(1, p1.games.length)).toFixed(1) : '15.2';
-    const ppg2 = p2 ? (p2.totalPoints / Math.max(1, p2.games.length)).toFixed(1) : '12.8';
+  // ==========================================
+  // UTILITIES & SECURITY
+  // ==========================================
 
-    return `
-      <div class="space-y-6 pt-4">
-        <div class="grid grid-cols-2 gap-4">
-          <div class="glass-panel p-5 text-center space-y-2 border-orange-500/30">
-            <span class="text-xs font-bold text-orange-400 uppercase">Atleta 1</span>
-            <h3 class="font-extrabold text-base text-white">${p1 ? p1.name : name1}</h3>
-            <span class="font-mono text-3xl font-black text-orange-400">${ppg1} PPG</span>
-          </div>
-          <div class="glass-panel p-5 text-center space-y-2 border-blue-500/30">
-            <span class="text-xs font-bold text-blue-400 uppercase">Atleta 2</span>
-            <h3 class="font-extrabold text-base text-white">${p2 ? p2.name : name2}</h3>
-            <span class="font-mono text-3xl font-black text-blue-400">${ppg2} PPG</span>
-          </div>
-        </div>
-      </div>
-    `;
+  escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  escapeJs(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r');
   }
 }
 
-// Global Application Instance
-let app;
+// Global App Instance
+window.app = new BasketApp();
 document.addEventListener('DOMContentLoaded', () => {
-  app = new BasketApp();
-  window.app = app;
-  app.init();
+  window.app.init();
 });

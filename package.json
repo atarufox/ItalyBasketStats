@@ -1,0 +1,19 @@
+{
+  "name": "italy-basket-stats-2",
+  "version": "2.0.0",
+  "description": "Applicazione Web per statistiche ufficiali FIP Pallacanestro con Live GraphQL API",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve . -l 3000",
+    "dev": "npx serve . -l 3000"
+  },
+  "keywords": [
+    "fip",
+    "basketball",
+    "stats",
+    "italy",
+    "nbn23"
+  ],
+  "author": "atarufox",
+  "license": "MIT"
+}

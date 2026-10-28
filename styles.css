@@ -1,162 +1,160 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
+/* FIP Stats Official Theme - ItalyBasketStats2 */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap');
 
 :root {
-  --bg-primary: #0b0f19;
-  --bg-secondary: #111827;
-  --bg-card: rgba(17, 24, 39, 0.85);
-  --bg-card-hover: rgba(31, 41, 55, 0.95);
-  --border-color: rgba(255, 255, 255, 0.08);
-  --border-focus: #f97316;
-  --accent-orange: #f97316;
-  --accent-orange-glow: rgba(249, 115, 22, 0.35);
-  --accent-blue: #3b82f6;
-  --accent-blue-glow: rgba(59, 130, 246, 0.35);
-  --accent-emerald: #10b981;
-  --accent-red: #ef4444;
-  --text-main: #f3f4f6;
-  --text-muted: #9ca3af;
-  --text-dim: #6b7280;
-  --court-wood: #2d1b0d;
+  --fip-bg: #090e17;
+  --fip-card: #111a2c;
+  --fip-card-hover: #16223a;
+  --fip-border: rgba(255, 255, 255, 0.08);
+  --fip-blue: #2563eb;
+  --fip-blue-glow: rgba(37, 99, 235, 0.25);
+  --fip-gold: #f59e0b;
+  --fip-orange: #f97316;
+  --fip-green: #10b981;
 }
 
 * {
-  margin: 0;
-  padding: 0;
   box-sizing: border-box;
-  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-  -webkit-tap-highlight-color: transparent;
+  font-family: 'Outfit', sans-serif;
 }
 
 body {
-  background-color: var(--bg-primary);
-  color: var(--text-main);
-  min-height: 100vh;
+  background-color: var(--fip-bg);
+  color: #f1f5f9;
   overflow-x: hidden;
-  background-image: 
-    radial-gradient(circle at 10% 20%, rgba(249, 115, 22, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.08) 0%, transparent 40%),
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
 }
 
-/* Glassmorphism */
-.glass-panel {
-  background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
+code, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
 }
 
-.glass-panel-hover {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+/* Glass Panels */
+.fip-card {
+  background: var(--fip-card);
+  border: 1px solid var(--fip-border);
+  border-radius: 1rem;
+  backdrop-filter: blur(12px);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.glass-panel-hover:hover {
-  background: var(--bg-card-hover);
-  border-color: rgba(249, 115, 22, 0.3);
+.fip-card-hover:hover {
+  background: var(--fip-card-hover);
+  border-color: rgba(37, 99, 235, 0.4);
   transform: translateY(-2px);
-  box-shadow: 0 12px 30px -10px var(--accent-orange-glow);
+  box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.5), 0 0 20px -5px var(--fip-blue-glow);
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(249, 115, 22, 0.5);
+/* Scoreboard Quarters */
+.quarter-box {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  text-align: center;
 }
 
-/* Custom Badges */
-.badge-fip {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(37, 99, 235, 0.3));
-  border: 1px solid rgba(59, 130, 246, 0.5);
-  color: #60a5fa;
-  font-weight: 700;
-  text-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+/* Stat Comparison Bars */
+.stat-bar-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
 }
 
-.badge-canestro {
-  background: linear-gradient(135deg, rgba(249, 115, 22, 0.2), rgba(234, 88, 12, 0.3));
-  border: 1px solid rgba(249, 115, 22, 0.5);
-  color: #fb923c;
-  font-weight: 700;
-  text-shadow: 0 0 10px rgba(249, 115, 22, 0.4);
-}
-
-.badge-live {
-  background: rgba(239, 68, 68, 0.2);
-  border: 1px solid rgba(239, 68, 68, 0.6);
-  color: #f87171;
-  animation: pulse-live 1.8s infinite;
-}
-
-@keyframes pulse-live {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.7; transform: scale(0.96); }
-}
-
-/* Basketball Court Graphic Motif */
-.court-bg {
-  background: radial-gradient(circle at 50% 50%, rgba(249, 115, 22, 0.05) 0%, transparent 70%);
+.stat-bar-track {
+  flex: 1;
+  height: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 9999px;
+  overflow: hidden;
   position: relative;
 }
 
-.court-line {
-  border: 1px solid rgba(255, 255, 255, 0.06);
+.stat-bar-fill-left {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--fip-blue);
+  border-radius: 9999px;
+  transition: width 0.5s ease-out;
 }
 
-/* Monospace stats */
-.mono-stat {
-  font-family: 'JetBrains Mono', monospace;
-  font-variant-numeric: tabular-nums;
+.stat-bar-fill-right {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--fip-gold);
+  border-radius: 9999px;
+  transition: width 0.5s ease-out;
 }
 
-/* Tablet & Mobile Layout Enhancements */
-@media (max-width: 768px) {
-  .mobile-bottom-nav {
-    display: flex !important;
-  }
-  .desktop-nav {
-    display: none !important;
-  }
-  .main-content {
-    padding-bottom: 90px !important;
-  }
+/* Basketball Court for Shot Chart */
+.court-container {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  aspect-ratio: 1.88 / 1;
+  background: #0d1524;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  margin: 0 auto;
 }
 
-@media (min-width: 769px) {
-  .mobile-bottom-nav {
-    display: none !important;
-  }
-  .desktop-nav {
-    display: flex !important;
-  }
+.shot-marker {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  transition: transform 0.15s ease;
 }
 
-/* Custom animation classes */
-.fade-in {
-  animation: fadeIn 0.3s ease-out forwards;
+.shot-marker:hover {
+  transform: translate(-50%, -50%) scale(1.6);
+  z-index: 20;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+.shot-made {
+  background-color: var(--fip-green);
+  box-shadow: 0 0 6px var(--fip-green);
 }
 
-/* Loader */
+.shot-missed {
+  border: 2px solid #ef4444;
+  background: transparent;
+}
+
+/* Navigation & Tabs */
+.fip-tab {
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.fip-tab.active {
+  color: #ffffff;
+  background: rgba(37, 99, 235, 0.15);
+  border-color: rgba(37, 99, 235, 0.4);
+}
+
+.fip-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 15%;
+  right: 15%;
+  height: 2px;
+  background: var(--fip-blue);
+  border-radius: 2px;
+}
+
+/* Spinner */
 .spinner {
   border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: var(--accent-orange);
+  border-top-color: var(--fip-blue);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -165,79 +163,18 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* Table styling */
-.stats-table th {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-dim);
-  font-weight: 700;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-color);
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
-
-.stats-table td {
-  padding: 12px;
-  font-size: 0.875rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+::-webkit-scrollbar-track {
+  background: #090e17;
 }
-
-.stats-table tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
 }
-
-/* Basketball Shot Chart Court Styles */
-.court-container {
-  background: radial-gradient(circle at 50% 85%, #182234 0%, #0c121e 100%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 20px;
-  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
-  position: relative;
-  overflow: hidden;
-}
-
-.court-svg {
-  width: 100%;
-  height: auto;
-  max-height: 480px;
-  display: block;
-}
-
-.shot-marker {
-  cursor: pointer;
-  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
-}
-
-.shot-marker:hover {
-  transform: scale(1.6);
-  z-index: 30;
-}
-
-.shot-tooltip {
-  position: absolute;
-  pointer-events: none;
-  z-index: 50;
-  transition: opacity 0.15s ease;
-}
-
-/* Match Tab Active Indicator */
-.match-tab-btn {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.match-tab-btn.active {
-  background: rgba(249, 115, 22, 0.2);
-  color: #f97316;
-  border-color: rgba(249, 115, 22, 0.4);
-  box-shadow: 0 4px 15px -3px rgba(249, 115, 22, 0.25);
-}
-
-/* Responsive Sticky Table Columns */
-@media (max-width: 640px) {
-  .sticky-col {
-    position: sticky;
-    left: 0;
-    background: #111827;
-    z-index: 10;
-  }
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(37, 99, 235, 0.4);
 }
